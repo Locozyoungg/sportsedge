@@ -45,7 +45,7 @@ def probabilities(pred, row, cfg) -> dict | None:
         oo = get_odds(row, [c["over"], c["under"]])
         if oo is not None:
             grid = pred.grid(row)
-            po = mk.ou_probs(grid, 2.5)[0]
+            po = pred.ou_prob(row) if hasattr(pred, "ou_prob") else mk.ou_probs(grid, 2.5)[0]
             so = get_odds(row, [c["sharp_over"], c["sharp_under"]])
             m = devig_power(so if so is not None else oo)[0]
             out["ou"] = {"model": po, "market": m, "final": w * m + (1 - w) * po, "odds": haircut(oo, b.get("odds_haircut", 0.0))}

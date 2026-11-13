@@ -3,6 +3,7 @@ Everything is walk-forward: each prediction uses only data available before kick
 from __future__ import annotations
 import numpy as np
 import pandas as pd
+from . import markets as mk
 from .features import FeatureState
 from .model import PoissonModel
 from .external import NullProvider
@@ -122,8 +123,9 @@ def stack_walk_forward(table: pd.DataFrame, cfg) -> pd.DataFrame:
 class PoissonPredictor:
     kind = "poisson"
 
-    def __init__(self, model):
+    def __init__(self, model, ou_b: float = 0.0):
         self.model = model
+        self.ou_b = ou_b
 
     def knows(self, row):
         return self.model.knows(row["HomeTeam"], row["AwayTeam"])
@@ -137,12 +139,18 @@ class PoissonPredictor:
     def xg(self, row):
         return self.model.expected_goals(row["HomeTeam"], row["AwayTeam"])
 
+    def ou_prob(self, row):
+        """P(over 2.5) with the leak-free per-league totals-bias correction applied (AUDIT item 4)."""
+        from . import markets as mk
+        p = mk.ou_probs(self.grid(row), 2.5)[0]
+        return mk.apply_ou_bias(p, self.ou_b)
+
 
 class StackPredictor(PoissonPredictor):
     kind = "stack"
 
-    def __init__(self, model, stacker, feat_fn):
-        super().__init__(model)
+    def __init__(self, model, stacker, feat_fn, ou_b: float = 0.0):
+        super().__init__(model, ou_b)
         self.stacker, self.feat_fn = stacker, feat_fn
 
     def one_x_two(self, row):
@@ -164,9 +172,10 @@ def make_predictors(hist: pd.DataFrame, cfg, ext=None) -> dict:
         if len(g) < 200:
             continue
         pm = _pmodel(cfg).fit(g)
+        ou_b = mk.fit_ou_bias(pm, g)
         if use_stack and stacker is not None:
             st = states[div]
-            preds[div] = StackPredictor(pm, stacker, lambda r, st=st: st.features(r["HomeTeam"], r["AwayTeam"], r["Date"], r, ext))
+            preds[div] = StackPredictor(pm, stacker, lambda r, st=st: st.features(r["HomeTeam"], r["AwayTeam"], r["Date"], r, ext), ou_b)
         else:
-            preds[div] = PoissonPredictor(pm)
+            preds[div] = PoissonPredictor(pm, ou_b)
     return preds

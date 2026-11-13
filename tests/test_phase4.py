@@ -303,6 +303,45 @@ def test_min_stake_threshold_drops_dust_bets(tmp_path, monkeypatch):
     assert led.db.execute("SELECT COUNT(*) FROM bets").fetchone()[0] == 0
 
 
+def test_ou_bias_correction_units(tmp_path):
+    """AUDIT item 4: fit_ou_bias corrects systematic under-prediction of overs; never corrects downward."""
+    import numpy as np
+    from scipy.stats import poisson
+    from sportsedge import markets as mk
+
+    class MockModel:
+        def knows(self, home, away):
+            return True
+
+        def score_grid(self, home, away):
+            k = np.arange(11)
+            g = np.outer(poisson.pmf(k, 1.5), poisson.pmf(k, 1.2))  # P(over) ~ 0.55
+            return g / g.sum()
+
+    rng = np.random.default_rng(0)
+    train = pd.DataFrame({
+        "HomeTeam": ["A"] * 300, "AwayTeam": ["B"] * 300,
+        "FTHG": rng.poisson(1.8, 300), "FTAG": rng.poisson(1.4, 300),  # actual over rate ~0.65
+    })
+    b = mk.fit_ou_bias(MockModel(), train)
+    raw = mk.ou_probs(MockModel().score_grid("A", "B"), 2.5)[0]
+    fixed = mk.apply_ou_bias(raw, b)
+    assert b > 0 and fixed > raw
+    assert abs(fixed - float((train.FTHG + train.FTAG > 2.5).mean())) < 0.05
+    low = train.copy()
+    low["FTHG"], low["FTAG"] = rng.poisson(0.9, 300), rng.poisson(0.8, 300)  # over rate below predicted
+    assert mk.fit_ou_bias(MockModel(), low) == 0.0  # never correct downward
+
+
+def test_backtest_with_ou_correction_runs(tmp_path):
+    """The correction is wired through the backtest without changing 1X2 behaviour."""
+    from sportsedge.backtest import run_backtest
+    c = cfg_tmp(tmp_path)
+    df = synth(seasons=3)
+    r = run_backtest(df, c)
+    assert r["n_predictions"] > 100 and "logloss_model" in r
+
+
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHANNEL_ID", raising=False)

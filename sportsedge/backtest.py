@@ -33,13 +33,14 @@ def run_backtest(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame
         win = df[(df.Date >= cur) & (df.Date < end)]
         if len(win):
             model = _pmodel(cfg).fit(df, as_of=cur)
-            pred = PoissonPredictor(model)
+            ou_b = mk.fit_ou_bias(model, df[df.Date < cur])
+            pred = PoissonPredictor(model, ou_b)
             if use_stack:
                 tr = table[(table.Date < cur)].dropna(subset=["pois_h"])
                 tr = tr[tr.y >= 0]
                 if len(tr) >= cfg.get("stack", {}).get("min_train", 300):
                     stacker = Stacker(cfg).fit(tr, tr.y)
-                    pred = StackPredictor(model, stacker, lambda r: table.loc[r.name, BASE_FEATURES].to_dict())
+                    pred = StackPredictor(model, stacker, lambda r: table.loc[r.name, BASE_FEATURES].to_dict(), ou_b)
             for rid, row in win.iterrows():
                 row = row.copy(); row.name = rid
                 if row.Date != day:

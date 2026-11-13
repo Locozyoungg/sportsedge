@@ -12,6 +12,51 @@ def btts(grid: np.ndarray) -> float:
     return float(grid[1:, 1:].sum())
 
 
+def _sigmoid(z):
+    z = np.clip(z, -30, 30)
+    return 1.0 / (1.0 + np.exp(-z))
+
+
+def fit_ou_bias(model, train) -> float:
+    """Logit-intercept correction so the mean predicted P(over 2.5) matches the ACTUAL over rate on
+    TRAINING data (AUDIT finding: Poisson under-predicts overs by ~3.4pp overall — a distributional,
+    not mean-goals, bias). Upward correction only (unders were over-predicted); bounded by +/-1.5.
+    Must be fit on the same training slice the model was fit on (leak-free)."""
+    if len(train) < 100:
+        return 0.0
+    preds, acts = [], []
+    for _, r in train.iterrows():
+        if not model.knows(r.HomeTeam, r.AwayTeam):
+            continue
+        preds.append(ou_probs(model.score_grid(r.HomeTeam, r.AwayTeam), 2.5)[0])
+        acts.append(1.0 if int(r.FTHG) + int(r.FTAG) > 2.5 else 0.0)
+    if len(acts) < 50:
+        return 0.0
+    p = np.clip(np.asarray(preds), 1e-6, 1 - 1e-6)
+    target = float(np.asarray(acts).mean())
+
+    def mean_after(b):
+        return float(_sigmoid(np.log(p / (1 - p)) + b).mean())
+
+    if mean_after(0.0) >= target:  # no systematic under-prediction of overs: leave alone
+        return 0.0
+    lo, hi = 0.0, 1.5
+    for _ in range(40):
+        mid = (lo + hi) / 2
+        if mean_after(mid) < target:
+            lo = mid
+        else:
+            hi = mid
+    return float((lo + hi) / 2)
+
+
+def apply_ou_bias(p: float, b: float) -> float:
+    if not b:
+        return p
+    z = np.log(np.clip(p, 1e-9, 1 - 1e-9) / (1 - np.clip(p, 1e-9, 1 - 1e-9))) + b
+    return float(_sigmoid(z))
+
+
 def _simple_ah(grid, h):
     """Home side at half/whole line h. Returns (win, push, loss)."""
     d = np.subtract.outer(np.arange(grid.shape[0]), np.arange(grid.shape[1])) + h
