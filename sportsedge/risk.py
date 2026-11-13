@@ -6,7 +6,10 @@ from .odds import kelly_fraction
 def stake(bankroll: float, prob: float, odds: float, cfg: dict, scale: float = 1.0) -> float:
     f = kelly_fraction(prob, odds) * scale * cfg["kelly_fraction"]
     f = min(f, cfg["max_stake_pct"])
-    return round(max(0.0, bankroll * f), 2)
+    s = round(max(0.0, bankroll * f), 2)
+    if cfg.get("min_stake_pct") and 0 < s < cfg["min_stake_pct"] * bankroll:
+        return 0.0  # dust stake: below the publish threshold, never placed
+    return s
 
 
 class DailyGuard:

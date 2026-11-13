@@ -281,6 +281,28 @@ def test_load_history_unifies_bom_mojibake_headers(tmp_path):
     assert not validate_history(bad, cfg)["ok"]
 
 
+def test_min_stake_threshold_drops_dust_bets(tmp_path, monkeypatch):
+    """Phase 2 item 1: a pick whose stake is below min_stake_pct must never be placed or published."""
+    from sportsedge.risk import stake
+    c = cfg_tmp(tmp_path)
+    b = c["betting"]
+    b["min_stake_pct"] = 0.005
+    assert stake(1000, 0.501, 2.0, b) == 0.0          # tiny edge -> dust stake -> 0
+    assert stake(1000, 0.6, 2.0, b) > 0.0             # real edge survives
+    del b["min_stake_pct"]
+    assert stake(1000, 0.501, 2.0, b) > 0.0           # without the threshold, dust was possible
+    # end-to-end: with the threshold, a marginal pick is filtered before the ledger
+    df, fx = _setup_pipeline(tmp_path, c)
+    c["betting"]["min_stake_pct"] = 1.0               # impossibly high: nothing may be placed
+    fake = FakeTG()
+    monkeypatch.setattr(cli, "TelegramPublisher", lambda: fake)
+    _no_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    cli.cmd_predict(c, record=True, publish=True)
+    led = Ledger(c["paths"]["ledger"])
+    assert led.db.execute("SELECT COUNT(*) FROM bets").fetchone()[0] == 0
+
+
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHANNEL_ID", raising=False)
