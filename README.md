@@ -46,8 +46,22 @@ the gated `learn` gate plus your explicit approval. `autopilot` runs shadow dail
 Drift detection: `health` now also pauses publishing when a single league is persistently worse
 than the market over its last 100+ settled predictions (odds-schema or team-name-join drift).
 
-## v0.2 model upgrades
-- **Dixon-Coles** low-score correction + time decay + optional new-team prior (`model.dc`, `model.newteam_prior`).
+## Phase 2 safety & calibration (config.yaml)
+- `betting.min_stake_pct` (0.5%): picks whose stake rounds below this share of bankroll are never placed or published.
+- `betting.max_edge` / `betting.edge_caps` (0.15; per-league overrides): edges above the cap are
+  "model-vs-market disagreement" — logged to `models/suspicious_log.jsonl`, never published.
+- `betting.max_league_pct`, `max_market_pct`, `max_day_pct` (3%/3%/6%): per-day exposure caps; when a
+  cap binds, ALL stakes in the group scale down proportionally. The daily loss limit is enforced in the live path.
+- Totals calibration: a leak-free per-league correction on P(over 2.5) is fit at every model refit
+  (AUDIT: Unders were over-predicted). Only corrects upward; never applied when training shows no bias.
+- `external.publish_impact_threshold` (2.0): pre-publish lineup/injury gate — picks on matches at or
+  above this impact are downgraded and logged (`models/publish_gate_log.jsonl`), never posted.
+- Every pick records its odds snapshot time (`odds_ts`) and, from the odds feed, which book supplied
+  the best price (`book`, shown in posts).
+- Data: `fetch`/`load_history` normalize BOM-mojibake headers (all seasons now actually train), and
+  `validate` fails on NaN `Div` rows.
+
+## v0.2 model upgrades- **Dixon-Coles** low-score correction + time decay + optional new-team prior (`model.dc`, `model.newteam_prior`).
 - **Stacked ensemble** (`model.type: stack`): Poisson probs + Elo + form + xG-proxy (from shots) + rest/congestion + market + injuries,
   fed to logistic regression + gradient boosting. All features are leak-free and walk-forward. It is only adopted by the held-out gate in `learn`.
 - **Markets**: 1X2, Over/Under 2.5, Asian handicap (incl. quarter lines, pushes, correct settlement). BTTS probabilities available for analysis.
