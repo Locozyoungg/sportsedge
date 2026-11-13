@@ -46,7 +46,7 @@ def load_history(raw_dir) -> pd.DataFrame:
     frames = []
     for f in sorted(os.listdir(raw_dir)):
         if f.endswith(".csv") and f != "fixtures.csv":
-            frames.append(pd.read_csv(f"{raw_dir}/{f}", parse_dates=["Date"]))
+            frames.append(_clean_cols(pd.read_csv(f"{raw_dir}/{f}", parse_dates=["Date"])))
     if not frames:
         raise SystemExit("No data. Run: python -m sportsedge fetch")
     df = pd.concat(frames, ignore_index=True)

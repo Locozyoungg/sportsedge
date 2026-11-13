@@ -258,6 +258,29 @@ def test_fixtures_csv_bom_and_lowercase_div(tmp_path):
         assert "Div" in fx.columns and fx.Div.iloc[0] == "E0", (header, list(fx.columns))
 
 
+def test_load_history_unifies_bom_mojibake_headers(tmp_path):
+    """AUDIT finding 0: seasons fetched with mojibake 'ï»¿Div' headers must not silently lose their Div.
+    Regression: they used to concat under a second column and vanish from per-league training."""
+    from sportsedge import data
+    from sportsedge.validate import validate_history
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    (raw / "2324_D1.csv").write_text(  # clean header
+        "Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\nD1,2024-08-23,A,B,1,0,H\nD1,2024-08-24,C,D,2,2,D\n",
+        encoding="utf-8")
+    (raw / "2425_D1.csv").write_text(  # mojibake header, as fetched pre-fix; distinct matches
+        "ï»¿Div,Date,HomeTeam,AwayTeam,FTHG,FTAG,FTR\nD1,2025-08-23,E,F,0,3,A\nD1,2025-08-24,G,H,1,1,D\n",
+        encoding="utf-8")
+    df = data.load_history(str(raw))
+    assert len(df) == 4 and df.Div.notna().all() and set(df.Div) == {"D1"}
+    cfg = {"betting": {"venues": {"bookmaker": {"cols": ["B365H", "B365D", "B365A"]}}}}
+    assert validate_history(df, cfg)["ok"]
+    # and the validator must flag NaN Div if it ever reappears
+    bad = df.copy()
+    bad.loc[0, "Div"] = None
+    assert not validate_history(bad, cfg)["ok"]
+
+
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHANNEL_ID", raising=False)

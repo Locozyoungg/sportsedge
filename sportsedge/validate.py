@@ -11,6 +11,9 @@ def validate_history(df: pd.DataFrame, cfg) -> dict:
     miss = [c for c in REQUIRED if c not in df.columns]
     if miss:
         return {"ok": False, "fatal": [f"missing columns {miss}"], "warn": []}
+    nan_div = int(df["Div"].isna().sum())
+    if nan_div:
+        fatal.append(f"{nan_div} rows with missing Div (BOM-mojibake headers? see AUDIT.md finding 0)")
     if df.duplicated(["Div", "Date", "HomeTeam", "AwayTeam"]).any():
         fatal.append(f"{int(df.duplicated(['Div', 'Date', 'HomeTeam', 'AwayTeam']).sum())} duplicate matches")
     if (df[["FTHG", "FTAG"]] < 0).any().any():
