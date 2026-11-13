@@ -1,10 +1,28 @@
 """Model + prices -> candidate bets across markets (1X2, Over/Under 2.5, Asian handicap) and venues (bookmaker, Polymarket)."""
 from __future__ import annotations
+import datetime as dt
+import json
+import os
 import numpy as np
 from . import markets as mk
 from .odds import devig_power, edge, get_odds, get_probs, haircut  # noqa: F401  (get_odds re-exported)
 
 OUT = ["H", "D", "A"]
+
+
+def _edge_cap(cfg: dict, div) -> float:
+    return float(cfg["betting"].get("edge_caps", {}).get(div, cfg["betting"].get("max_edge", 0.15)))
+
+
+def _log_suspicious(cfg: dict, bet: dict, div) -> None:
+    """Flag and log (never publish) edges above the league cap: model-vs-market disagreement."""
+    d = cfg.get("learning", {}).get("models_dir", "models")
+    os.makedirs(d, exist_ok=True)
+    rec = {"ts": dt.datetime.utcnow().isoformat(), "div": div, "market": bet["market"], "venue": bet["venue"],
+           "selection": bet["selection"], "line": bet.get("line"), "odds": bet["odds"],
+           "edge": bet["edge"], "cap": _edge_cap(cfg, div)}
+    with open(os.path.join(d, "suspicious_log.jsonl"), "a") as f:
+        f.write(json.dumps(rec, default=str) + "\n")
 
 
 def _ev_flag(x):
@@ -97,6 +115,14 @@ def candidates(pr: dict, cfg) -> list[dict]:
     return cands
 
 
-def best_bets(pr: dict, cfg) -> list[dict]:
+def best_bets(pr: dict, cfg, div=None) -> list[dict]:
     c = sorted(candidates(pr, cfg), key=lambda x: -x["edge"])
-    return c[: cfg["betting"].get("max_bets_per_match", 1)]
+    out = []
+    for bet in c:
+        if bet["edge"] > _edge_cap(cfg, div):
+            _log_suspicious(cfg, bet, div)   # too good to be true: flag for review, never publish
+            continue
+        out.append(bet)
+        if len(out) >= cfg["betting"].get("max_bets_per_match", 1):
+            break
+    return out

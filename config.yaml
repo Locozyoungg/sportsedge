@@ -33,6 +33,8 @@ betting:
   min_odds: 1.4
   max_odds: 8.0
   min_stake_pct: 0.005     # never publish a pick whose stake is below this share of bankroll (Phase 2 item 1)
+  max_edge: 0.15           # edges above this are "model-vs-market disagreement": never published, logged for review
+  edge_caps: {}            # per-league overrides, e.g. {E0: 0.12, SP1: 0.10}; falls back to max_edge
   max_bets_per_match: 1
   kelly_fraction: 0.25
   max_stake_pct: 0.02

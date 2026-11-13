@@ -53,7 +53,7 @@ def run_backtest(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame
                 y = IDX[row.FTR]
                 x2 = pr["x2"]
                 pm_l.append(x2["model"]); pf_l.append(x2["final"]); pk_l.append(x2["market"]); y_l.append(y)
-                for bet in best_bets(pr, cfg):
+                for bet in best_bets(pr, cfg, row.get("Div")):
                     if not guard.allowed():
                         break
                     s = stake(bankroll, bet["prob"], bet["odds"], bcfg, bet["scale"])

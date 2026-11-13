@@ -342,6 +342,33 @@ def test_backtest_with_ou_correction_runs(tmp_path):
     assert r["n_predictions"] > 100 and "logloss_model" in r
 
 
+def test_suspicious_edge_guard_flags_and_excludes(tmp_path):
+    """Phase 2 item 2: edges above the league cap are logged as model-vs-market disagreement, never published."""
+    from sportsedge.strategy import best_bets, _log_suspicious
+    from sportsedge.model import PoissonModel
+    from sportsedge.ensemble import PoissonPredictor
+    c = cfg_tmp(tmp_path)
+    c["betting"]["min_edge"] = -1.0
+    c["betting"]["max_bets_per_match"] = 5
+    c["betting"]["edge_caps"] = {"E0": 0.30}          # loose override for the fake league in this test
+    df = synth(seasons=3)
+    m = PoissonModel().fit(df.iloc[:-20])
+    row = df.iloc[-1].copy()
+    row["PM_H"], row["PM_D"], row["PM_A"] = 9.0, 9.0, 9.0   # absurd prices -> absurd edges
+    row["PM_MID_H"] = 0.4
+    c["betting"]["max_odds"] = 20
+    pr = __import__("sportsedge.strategy", fromlist=["probabilities"]).probabilities(PoissonPredictor(m), row, c)
+    bets = best_bets(pr, c, "E0")
+    assert all(b["edge"] <= 0.30 for b in bets)       # everything above the cap is gone
+    log = open(tmp_path / "models" / "suspicious_log.jsonl", encoding="utf-8").read().splitlines()
+    assert log and all(json.loads(l)["edge"] > 0.30 for l in log)   # ...and was logged
+    # stricter default cap: same setup, no override -> cap is max_edge (0.15)
+    c["betting"]["edge_caps"] = {}
+    c["betting"]["max_edge"] = 0.05
+    bets2 = best_bets(pr, c, "E0")
+    assert all(b["edge"] <= 0.05 for b in bets2)
+
+
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHANNEL_ID", raising=False)

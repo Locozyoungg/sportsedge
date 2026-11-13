@@ -108,7 +108,7 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
         if ledger:
             ledger.log_prediction(row["Div"], row, x2, cfg.get("_version", "v0"))
         print(f"{str(row.Date)[:10]} {row['Div']} {row.HomeTeam} v {row.AwayTeam} | H/D/A " + "/".join(f"{x:.2f}" for x in x2["final"]))
-        for bet in best_bets(pr, cfg):
+        for bet in best_bets(pr, cfg, row["Div"]):
             s = expo.clip((row.HomeTeam, row.AwayTeam), stake(bankroll, bet["prob"], bet["odds"], b, bet["scale"]))
             if s <= 0:
                 continue
@@ -177,7 +177,7 @@ def cmd_withdraw(cfg):
         pr = probabilities(pred, row, cfg) if pred is not None else None
         if pr is None:
             continue
-        for bet in best_bets(pr, cfg):
+        for bet in best_bets(pr, cfg, row["Div"]):
             keep.add((str(row.Date)[:10], row.HomeTeam, row.AwayTeam,
                       bet["market"], bet["selection"], format(bet["line"], "+g") if bet["line"] is not None else ""))
     n = 0
