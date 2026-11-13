@@ -137,6 +137,7 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
             sel = bet["selection"]
             bet.update(stake=s, home=row.HomeTeam, away=row.AwayTeam, date=row.Date, div=row["Div"],
                        xg=pred.xg(row), top_scores=top, odds_ts=odds_ts,
+                       book=row.get(f"Book{sel}") if bet["market"] in ("1X2", "OU25") and sel in "HDAOU" else None,
                        ref=row.get(f"PM_TOKEN_{sel}") if bet["venue"] == "polymarket" else None)
             collected.append((row.Date, bet))
     # realized daily-loss limit (Phase 2 item 5): block all new bets if today's settled losses exceed it

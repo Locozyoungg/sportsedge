@@ -17,6 +17,7 @@ def parse_events(events: list, div: str, cfg: dict, book_filter=None) -> pd.Data
     ou, rows = b["markets"]["ou"], []
     for e in events:
         best, pin, bo, po = [0.0] * 3, [None] * 3, [0.0, 0.0], [None, None]
+        bbook, bob = [None] * 3, [None, None]   # which book supplied the best price (Phase 2 item 8)
         for bk in e.get("bookmakers", []):
             if book_filter and bk["key"] not in book_filter and bk["key"] != "pinnacle":
                 continue
@@ -29,24 +30,30 @@ def parse_events(events: list, div: str, cfg: dict, book_filter=None) -> pd.Data
                     if bk["key"] == "pinnacle":
                         pin = v
                     elif not book_filter or bk["key"] in book_filter:
-                        best = [max(a, c) for a, c in zip(best, v)]
+                        for i, x in enumerate(v):
+                            if x > best[i]:
+                                best[i], bbook[i] = x, bk["key"]
                 elif m["key"] == "totals":
                     px = {o["name"]: o["price"] for o in m["outcomes"] if o.get("point") == 2.5}
                     if "Over" in px and "Under" in px:
                         if bk["key"] == "pinnacle":
                             po = [px["Over"], px["Under"]]
                         else:
-                            bo = [max(bo[0], px["Over"]), max(bo[1], px["Under"])]
+                            for i, k in enumerate(("Over", "Under")):
+                                if px[k] > bo[i]:
+                                    bo[i], bob[i] = px[k], bk["key"]
         if min(best) <= 1:
             continue
         r = {"Div": div, "Date": pd.Timestamp(e["commence_time"]).tz_localize(None) if pd.Timestamp(e["commence_time"]).tzinfo is None
              else pd.Timestamp(e["commence_time"]).tz_convert(None),
              "HomeTeam": e["home_team"], "AwayTeam": e["away_team"]}
         r.update(dict(zip(cols, best)))
+        r.update({"BookH": bbook[0], "BookD": bbook[1], "BookA": bbook[2]})
         if None not in pin:
             r.update(dict(zip(sharp, pin)))
         if min(bo) > 1:
             r[ou["over"]], r[ou["under"]] = bo
+            r["BookO"], r["BookU"] = bob
         if None not in po:
             r[ou["sharp_over"]], r[ou["sharp_under"]] = po
         rows.append(r)

@@ -11,7 +11,7 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS bets(
  id INTEGER PRIMARY KEY, ts TEXT, match_date TEXT, home TEXT, away TEXT,
  market TEXT, selection TEXT, odds REAL, stake REAL, prob REAL, edge REAL,
  status TEXT DEFAULT 'open', pnl REAL, mode TEXT, line REAL, venue TEXT, ref TEXT,
- div TEXT, clv REAL, message_id INTEGER, odds_ts TEXT,
+ div TEXT, clv REAL, message_id INTEGER, odds_ts TEXT, book TEXT,
  UNIQUE(match_date, home, away, market, selection, mode))"""
 
 
@@ -30,7 +30,7 @@ class Ledger:
         self.db.execute(PRED_SCHEMA)
         for col, typ in (("line", "REAL"), ("venue", "TEXT"), ("ref", "TEXT"),
                          ("div", "TEXT"), ("clv", "REAL"), ("message_id", "INTEGER"),
-                         ("odds_ts", "TEXT")):   # migrate older ledgers
+                         ("odds_ts", "TEXT"), ("book", "TEXT")):   # migrate older ledgers
             try:
                 self.db.execute(f"ALTER TABLE bets ADD COLUMN {col} {typ}")
             except sqlite3.OperationalError:
@@ -39,10 +39,11 @@ class Ledger:
     def add(self, bet: dict, mode="paper") -> bool:
         try:
             self.db.execute(
-                "INSERT INTO bets(ts,match_date,home,away,market,selection,odds,stake,prob,edge,mode,line,venue,ref,div,odds_ts) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO bets(ts,match_date,home,away,market,selection,odds,stake,prob,edge,mode,line,venue,ref,div,odds_ts,book) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (dt.datetime.utcnow().isoformat(), str(bet["date"])[:10], bet["home"], bet["away"], bet.get("market", "1X2"),
                  bet["selection"], bet["odds"], bet["stake"], bet["prob"], bet["edge"], mode,
-                 bet.get("line"), bet.get("venue", "bookmaker"), bet.get("ref"), bet.get("div"), bet.get("odds_ts")))
+                 bet.get("line"), bet.get("venue", "bookmaker"), bet.get("ref"), bet.get("div"),
+                 bet.get("odds_ts"), bet.get("book")))
             self.db.commit()
             return True
         except sqlite3.IntegrityError:

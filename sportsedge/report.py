@@ -19,9 +19,10 @@ def pick_label(b: dict) -> str:
 
 def format_bet(b: dict) -> str:
     imp = 1 / b["odds"]
+    book = f" <i>({e(b['book'])})</i>" if b.get("book") else ""
     lines = [
         f"<b>{e(b['home'])} vs {e(b['away'])}</b>  <i>({e(str(b.get('div', '')))} · {str(b['date'])[:10]})</i>",
-        f"Pick: <b>{pick_label(b)}</b> @ <b>{b['odds']:.2f}</b>"
+        f"Pick: <b>{pick_label(b)}</b> @ <b>{b['odds']:.2f}</b>{book}"
         + (" <i>(Polymarket YES)</i>" if b.get("venue") == "polymarket" else ""),
         f"Our probability {b['prob']:.0%} vs odds-implied {imp:.0%} → edge <b>{b['edge']:.1%}</b>",
     ]

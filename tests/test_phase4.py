@@ -432,6 +432,15 @@ def test_lineup_gate_blocks_publish_on_high_injury_impact(tmp_path, monkeypatch)
     assert fake.posted  # other picks still went out
 
 
+def test_format_bet_shows_book_when_known():
+    """Phase 2 item 8: posts name the book that supplied the best price."""
+    from sportsedge.report import format_bet
+    b = dict(home="A", away="B", date="2026-11-14", div="E0", odds=1.9, prob=.55, edge=.05,
+             stake_pct=1.0, selection="H", market="1X2", book="bet365")
+    assert "bet365" in format_bet(b)
+    assert "book" not in format_bet(dict(b, book=None)).replace("bookmaker", "")
+
+
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHANNEL_ID", raising=False)

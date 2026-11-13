@@ -90,6 +90,7 @@ def test_odds_feed_parse_and_name_mapping():
                {"key": "pinnacle", "markets": [{"key": "h2h", "outcomes": [{"name": "Manchester United", "price": 2.15}, {"name": "Draw", "price": 3.45}, {"name": "Tottenham Hotspur", "price": 3.7}]}]}]}]
     fx = oddsfeed.parse_events(ev, "E0", cfg)
     assert fx.loc[0, "B365H"] == 2.2 and fx.loc[0, "B365D"] == 3.4 and fx.loc[0, "PSH"] == 2.15   # best-of-books + Pinnacle ref
+    assert fx.loc[0, "BookH"] == "bookB" and fx.loc[0, "BookD"] == "bookA"   # Phase 2 item 8: best book tracked per selection
     hist = pd.DataFrame({"Div": "E0", "HomeTeam": ["Man United", "Tottenham"], "AwayTeam": ["Tottenham", "Man United"]})
     mapped = oddsfeed.map_names(fx, hist)
     assert mapped.loc[0, "HomeTeam"] == "Man United" and mapped.loc[0, "AwayTeam"] == "Tottenham"
