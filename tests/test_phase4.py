@@ -397,6 +397,15 @@ def test_backtest_with_caps_and_guard_runs(tmp_path):
         assert r["max_drawdown"] <= 0  # drawdown is non-positive by construction
 
 
+def test_odds_timestamp_stored_with_bet(tmp_path):
+    """Phase 2 item 6: every bet records when its odds snapshot was written (fixtures file mtime)."""
+    led = Ledger(str(tmp_path / "l.sqlite"))
+    bet = dict(date="2026-11-14", home="A", away="B", market="1X2", selection="H",
+               odds=2.0, stake=5, prob=0.5, edge=0.0, div="E0", odds_ts="2026-11-14T08:00:00")
+    assert led.add(bet)
+    assert led.db.execute("SELECT odds_ts FROM bets").fetchone()[0] == "2026-11-14T08:00:00"
+
+
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHANNEL_ID", raising=False)

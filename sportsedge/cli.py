@@ -96,6 +96,7 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
     paper, pm_broker = _brokers(cfg, ledger) if record else (None, None)
     b = cfg["betting"]
     bankroll = b["bankroll"]
+    odds_ts = dt.datetime.fromtimestamp(os.path.getmtime(data.fixtures_path(raw))).isoformat()  # Phase 2 item 6: odds freshness
     slips, n, shown = [], 0, 0
     collected = []   # (date, bet) — allocated per day after all picks for that day are known
     for _, row in fx.sort_values("Date").iterrows():
@@ -116,7 +117,7 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
             top = sorted(((f"{i}-{j}", float(grid[i, j])) for i in range(4) for j in range(4)), key=lambda t: -t[1])[:3]
             sel = bet["selection"]
             bet.update(stake=s, home=row.HomeTeam, away=row.AwayTeam, date=row.Date, div=row["Div"],
-                       xg=pred.xg(row), top_scores=top,
+                       xg=pred.xg(row), top_scores=top, odds_ts=odds_ts,
                        ref=row.get(f"PM_TOKEN_{sel}") if bet["venue"] == "polymarket" else None)
             collected.append((row.Date, bet))
     # realized daily-loss limit (Phase 2 item 5): block all new bets if today's settled losses exceed it
