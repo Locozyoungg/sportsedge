@@ -39,7 +39,9 @@ betting:
   kelly_fraction: 0.25
   max_stake_pct: 0.02
   max_match_pct: 0.03      # total exposure per match
-  max_day_pct: 0.08        # total new exposure per day
+  max_league_pct: 0.03     # total exposure per league per day (Phase 2 item 5)
+  max_market_pct: 0.03     # total exposure per market type per day (Phase 2 item 5)
+  max_day_pct: 0.06        # total new exposure per day
   daily_loss_limit_pct: 0.06
   bankroll: 1000
 backtest:

@@ -7,7 +7,7 @@ from .ensemble import make_predictors
 from .external import load_provider
 from .ledger import Ledger
 from .report import format_bet, format_digest, format_results
-from .risk import stake, ExposureGuard
+from .risk import stake, allocate
 from .strategy import probabilities, best_bets
 from .telegram import TelegramPublisher
 from .validate import validate_history
@@ -96,8 +96,8 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
     paper, pm_broker = _brokers(cfg, ledger) if record else (None, None)
     b = cfg["betting"]
     bankroll = b["bankroll"]
-    expo = ExposureGuard(bankroll, b["max_match_pct"], b["max_day_pct"])
     slips, n, shown = [], 0, 0
+    collected = []   # (date, bet) — allocated per day after all picks for that day are known
     for _, row in fx.sort_values("Date").iterrows():
         pred = preds.get(row["Div"])
         pr = probabilities(pred, row, cfg) if pred is not None else None
@@ -109,15 +109,31 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
             ledger.log_prediction(row["Div"], row, x2, cfg.get("_version", "v0"))
         print(f"{str(row.Date)[:10]} {row['Div']} {row.HomeTeam} v {row.AwayTeam} | H/D/A " + "/".join(f"{x:.2f}" for x in x2["final"]))
         for bet in best_bets(pr, cfg, row["Div"]):
-            s = expo.clip((row.HomeTeam, row.AwayTeam), stake(bankroll, bet["prob"], bet["odds"], b, bet["scale"]))
+            s = stake(bankroll, bet["prob"], bet["odds"], b, bet["scale"])
             if s <= 0:
                 continue
             grid = pred.grid(row)
             top = sorted(((f"{i}-{j}", float(grid[i, j])) for i in range(4) for j in range(4)), key=lambda t: -t[1])[:3]
             sel = bet["selection"]
             bet.update(stake=s, home=row.HomeTeam, away=row.AwayTeam, date=row.Date, div=row["Div"],
-                       stake_pct=100 * s / bankroll, xg=pred.xg(row), top_scores=top,
+                       xg=pred.xg(row), top_scores=top,
                        ref=row.get(f"PM_TOKEN_{sel}") if bet["venue"] == "polymarket" else None)
+            collected.append((row.Date, bet))
+    # realized daily-loss limit (Phase 2 item 5): block all new bets if today's settled losses exceed it
+    if record and ledger:
+        loss_today = sum(r[7] for r in ledger.settled_since(1) if r[7] < 0)
+        if loss_today < -bankroll * b["daily_loss_limit_pct"]:
+            print(f"daily loss limit hit (today {loss_today:.2f}): placing nothing")
+            collected = []
+    from itertools import groupby
+    for day, day_bets in groupby(sorted(collected, key=lambda t: t[0]), key=lambda t: t[0]):
+        bets = allocate([bet for _, bet in day_bets], bankroll, b)
+        for bet in bets:
+            s = bet["stake"]
+            if s <= 0:
+                continue
+            bet["stake_pct"] = 100 * s / bankroll
+            sel = bet["selection"]
             print(f"   >> BET [{bet['market']}] {sel}{'' if bet['line'] is None else ' ' + format(bet['line'], '+g')} @ {bet['odds']:.2f} "
                   f"stake {s} edge {bet['edge']:.1%} p={bet['prob']:.2f}")
             if record:

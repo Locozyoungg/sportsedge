@@ -5,7 +5,7 @@ import pandas as pd
 from . import markets as mk
 from .ensemble import PoissonPredictor, StackPredictor, Stacker, FEATURES, BASE_FEATURES, _pmodel, build_table
 from .odds import devig_power, get_odds
-from .risk import stake, DailyGuard, ExposureGuard
+from .risk import stake, DailyGuard, allocate
 from .strategy import probabilities, best_bets
 
 IDX = {"H": 0, "D": 1, "A": 2}
@@ -26,7 +26,7 @@ def run_backtest(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame
     cur, last = df["Date"].iloc[kc["min_train_matches"]], df["Date"].max()
     bankroll = bcfg["bankroll"]
     bets, pm_l, pf_l, pk_l, y_l = [], [], [], [], []
-    day, guard, expo = None, None, None
+    day, guard, day_pending, halted = None, None, [], False
     step = kc.get("refit_days", kc.get("refit_every_days", 7))
     while cur <= last:
         end = cur + pd.Timedelta(days=step)
@@ -41,12 +41,39 @@ def run_backtest(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame
                 if len(tr) >= cfg.get("stack", {}).get("min_train", 300):
                     stacker = Stacker(cfg).fit(tr, tr.y)
                     pred = StackPredictor(model, stacker, lambda r: table.loc[r.name, BASE_FEATURES].to_dict(), ou_b)
+
+            def flush():
+                """Settle one day's pending bets, scaling stakes down proportionally when caps bind."""
+                nonlocal bankroll
+                pending = [dict(match=(r.HomeTeam, r.AwayTeam), league=r.Div, market=b2["market"], stake=s2)
+                           for r, b2, s2 in day_pending]
+                allocate(pending, bankroll, bcfg)
+                for (r, b2, _), p in zip(day_pending, pending):
+                    s = p["stake"]
+                    if s <= 0:
+                        continue
+                    pnl = mk.pnl(b2["market"], b2["selection"], b2["line"], int(r.FTHG), int(r.FTAG), s, b2["odds"])
+                    clv = np.nan
+                    close = get_odds(r, bcfg["closing_cols"])
+                    if close is not None and b2["market"] == "1X2":
+                        clv = b2["odds"] * devig_power(close)[IDX[b2["selection"]]] - 1
+                    bankroll += pnl
+                    guard.record(pnl)
+                    bets.append({**b2, "date": r.Date, "match": f"{r.HomeTeam} v {r.AwayTeam}",
+                                 "stake": s, "pnl": pnl, "won": pnl > 0, "clv": clv, "bankroll": bankroll})
+                day_pending.clear()
+
             for rid, row in win.iterrows():
                 row = row.copy(); row.name = rid
                 if row.Date != day:
+                    if day_pending:
+                        flush()   # settle the previous day's bets before judging its losses
+                    if guard and not guard.allowed():
+                        halted = True   # previous day's realized loss exceeded the limit: halt, like the live path
                     day = row.Date
                     guard = DailyGuard(bankroll, bcfg["daily_loss_limit_pct"])
-                    expo = ExposureGuard(bankroll, bcfg["max_match_pct"], bcfg["max_day_pct"])
+                if halted:
+                    continue
                 pr = probabilities(pred, row, cfg)
                 if pr is None:
                     continue
@@ -54,21 +81,12 @@ def run_backtest(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame
                 x2 = pr["x2"]
                 pm_l.append(x2["model"]); pf_l.append(x2["final"]); pk_l.append(x2["market"]); y_l.append(y)
                 for bet in best_bets(pr, cfg, row.get("Div")):
-                    if not guard.allowed():
-                        break
                     s = stake(bankroll, bet["prob"], bet["odds"], bcfg, bet["scale"])
-                    s = expo.clip((row.HomeTeam, row.AwayTeam), s)
                     if s <= 0:
                         continue
-                    p = mk.pnl(bet["market"], bet["selection"], bet["line"], int(row.FTHG), int(row.FTAG), s, bet["odds"])
-                    clv = np.nan
-                    close = get_odds(row, bcfg["closing_cols"])
-                    if close is not None and bet["market"] == "1X2":
-                        clv = bet["odds"] * devig_power(close)[IDX[bet["selection"]]] - 1
-                    bankroll += p
-                    guard.record(p)
-                    bets.append({**bet, "date": row.Date, "match": f"{row.HomeTeam} v {row.AwayTeam}",
-                                 "stake": s, "pnl": p, "won": p > 0, "clv": clv, "bankroll": bankroll})
+                    day_pending.append((row, bet, s))
+            if day_pending:
+                flush()
         cur = end
     b = pd.DataFrame(bets)
     out = {"bets": b}

@@ -369,6 +369,34 @@ def test_suspicious_edge_guard_flags_and_excludes(tmp_path):
     assert all(b["edge"] <= 0.05 for b in bets2)
 
 
+def test_allocate_scales_proportionally_when_caps_bind():
+    """Phase 2 item 5: when per-match / per-league / per-market / day caps bind, ALL stakes in the
+    binding group scale down proportionally (no truncating only the last pick)."""
+    from sportsedge.risk import allocate
+    b = {"max_match_pct": 0.03, "max_league_pct": 0.03, "max_market_pct": 0.05, "max_day_pct": 0.06}
+    bets = [
+        dict(match=("A", "B"), league="E0", market="1X2", stake=20.0),
+        dict(match=("A", "B"), league="E0", market="1X2", stake=20.0),   # same match: 40 > 30 cap
+        dict(match=("C", "D"), league="E0", market="OU25", stake=10.0),  # league total 50 > 30
+        dict(match=("E", "F"), league="I1", market="OU25", stake=40.0),  # day: pushes total over 60
+    ]
+    allocate(bets, 1000, b)
+    assert bets[0]["stake"] == bets[1]["stake"]                      # proportional: pair keeps relative sizes
+    assert sum(x["stake"] for x in bets[:2]) <= 30.0 + 1e-6          # match cap respected
+    assert sum(x["stake"] for x in bets[:3]) <= 30.0 + 1e-6          # league cap respected (re-scales the pair)
+    assert sum(x["stake"] for x in bets) <= 60.0 + 1e-6              # day cap respected
+
+
+def test_backtest_with_caps_and_guard_runs(tmp_path):
+    from sportsedge.backtest import run_backtest
+    c = cfg_tmp(tmp_path)
+    c["betting"].update(max_league_pct=0.03, max_market_pct=0.03, max_day_pct=0.06)
+    r = run_backtest(synth(seasons=3), c)
+    assert r["n_predictions"] > 100
+    if "n_bets" in r:
+        assert r["max_drawdown"] <= 0  # drawdown is non-positive by construction
+
+
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHANNEL_ID", raising=False)
