@@ -26,6 +26,14 @@ learning loop with champion registry, rollback, and promotion cooldown. ~2,500 l
 ## Real-data verification
 
 - `fetch`: 7,592 matches, 6 leagues (2023-08 → 2026-11), validation clean (no duplicates, no bad scores, odds sane).
+- Live end-to-end test (2026-11-13): odds feed fetched 59 real fixtures across all 6 configured leagues,
+  `predict` produced probabilities for every match and 6 value picks, `paper` recorded 6 bets + 59 write-once
+  predictions, `shadow` logged 59 challenger predictions, `health` stayed healthy, `settle`/`postmortem`
+  correctly found nothing to settle yet (matches are upcoming). Telegram posting fails gracefully until the
+  chat ids are corrected (bot token verified OK).
+- Two real bugs found by testing and fixed: (1) football-data `fixtures.csv` ships a latin-1-mojibake BOM
+  (`ï»¿Div`) and lowercase `div` — both now normalized in `data.load_fixtures`/`_read` (regression-tested);
+  (2) `predict` exited silently when no fixture matched the configured leagues — now reports it.
 - `backtest` (walk-forward, per league): the honest verdict is **no evidence of edge yet**.
   - Model log loss is worse than the market in every league; the blend beats the raw model but only
     beats the market in 2 of 6 leagues and by a thin margin.

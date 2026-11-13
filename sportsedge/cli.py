@@ -88,19 +88,23 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
             pass
     raw = cfg["paths"]["raw_dir"]
     hist, fx = data.load_history(raw), data.load_fixtures(raw, cfg)
+    if fx.empty:
+        print("no upcoming fixtures. Run: python -m sportsedge fetch  (or `odds` with ODDS_API_KEY)")
+        return
     preds = make_predictors(hist, cfg, load_provider(cfg))
     ledger = Ledger(cfg["paths"]["ledger"]) if record else None
     paper, pm_broker = _brokers(cfg, ledger) if record else (None, None)
     b = cfg["betting"]
     bankroll = b["bankroll"]
     expo = ExposureGuard(bankroll, b["max_match_pct"], b["max_day_pct"])
-    slips, n = [], 0
+    slips, n, shown = [], 0, 0
     for _, row in fx.sort_values("Date").iterrows():
         pred = preds.get(row["Div"])
         pr = probabilities(pred, row, cfg) if pred is not None else None
         if pr is None:
             continue
         x2 = pr["x2"]
+        shown += 1
         if ledger:
             ledger.log_prediction(row["Div"], row, x2, cfg.get("_version", "v0"))
         print(f"{str(row.Date)[:10]} {row['Div']} {row.HomeTeam} v {row.AwayTeam} | H/D/A " + "/".join(f"{x:.2f}" for x in x2["final"]))
@@ -123,6 +127,9 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
                     slips.append(bet)   # only NEW bets are published, so reruns never double-post
             else:
                 slips.append(bet)
+    if shown == 0:
+        print(f"no fixtures matched configured leagues {cfg['leagues']} "
+              f"(fixtures cover: {sorted(fx.Div.dropna().unique().tolist())}). Try `odds` with ODDS_API_KEY.")
     if record:
         print(f"\nrecorded {n} new bets")
     if publish:

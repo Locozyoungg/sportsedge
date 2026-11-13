@@ -55,8 +55,9 @@ class TelegramPublisher:
                 continue
             r = self._call("sendMessage", {"chat_id": self.chat_id, "text": chunk, "parse_mode": "HTML",
                                            "disable_web_page_preview": True})
-            if r and r.get("message_id"):
-                ids.append(int(r["message_id"]))
+            mid = (r.get("result") or {}).get("message_id") if isinstance(r, dict) else None
+            if mid:
+                ids.append(int(mid))
                 time.sleep(1)  # stay well under channel rate limits
             else:
                 return []  # partial failure: caller must not mark anything as posted

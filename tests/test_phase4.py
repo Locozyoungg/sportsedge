@@ -246,6 +246,18 @@ def test_dashboard_helpers():
     assert per_league_roi(bets).iloc[0].roi == 15 / 15
 
 
+def test_fixtures_csv_bom_and_lowercase_div(tmp_path):
+    """football-data fixtures.csv ships 'ï»¿Div' (latin-1-decoded UTF-8 BOM) and can use lowercase 'div'."""
+    from sportsedge import data
+    raw = tmp_path / "raw"
+    raw.mkdir()
+    for header in ("﻿Div", "ï»¿Div", "div"):  # real BOM, mojibake BOM, lowercase
+        (raw / "fixtures.csv").write_text(
+            f"{header},Date,HomeTeam,AwayTeam\nE0,2026-11-22,Arsenal,Chelsea\n", encoding="utf-8")
+        fx = data.load_fixtures(str(raw))
+        assert "Div" in fx.columns and fx.Div.iloc[0] == "E0", (header, list(fx.columns))
+
+
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHANNEL_ID", raising=False)
@@ -253,3 +265,18 @@ def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     assert tg.post("short message") == [-1]
     assert tg.edit(5, "edited") is True
     assert "DRY RUN" in capsys.readouterr().out
+
+
+def test_telegram_post_extracts_message_id_from_result_envelope(monkeypatch):
+    """sendMessage returns the id under result.message_id — post() must find it there
+    (regression: the first version read r['message_id'] and treated a successful send as failure)."""
+    import sportsedge.telegram as tmod
+    monkeypatch.setattr(tmod.time, "sleep", lambda s: None)
+    ids = iter([42])
+    tg = TelegramPublisher(token="t", chat_id="c", dry_run=False)
+    monkeypatch.setattr(tg, "_call", lambda method, payload: {"ok": True, "result": {"message_id": next(ids)}})
+    assert tg.post("one message") == [42]
+    ids2 = iter([43])
+    tg2 = TelegramPublisher(token="t", chat_id="c", dry_run=False)
+    monkeypatch.setattr(tg2, "_call", lambda method, payload: {"ok": True, "result": {"message_id": next(ids2)}})
+    assert tg2.send("another") is True

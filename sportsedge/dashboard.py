@@ -7,11 +7,17 @@ Degrades gracefully when the ledger is empty or the data dir is missing.
 from __future__ import annotations
 import json
 import os
+import sys
+
+# streamlit executes this file as a plain script (no package context), so relative imports
+# would fail; make the project root importable and use absolute imports throughout.
+if __package__ in (None, ""):
+    sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 import yaml
 
-from .ledger import Ledger
+from sportsedge.ledger import Ledger
 
 LEARNING_LOG = "models/learning_log.jsonl"
 REPORTS_DIR = "reports"
@@ -20,7 +26,7 @@ REPORTS_DIR = "reports"
 def _load_cfg(path: str = "config.yaml") -> dict:
     with open(path) as f:
         cfg = yaml.safe_load(f)
-    from .learning import apply_champion
+    from sportsedge.learning import apply_champion
     return apply_champion(cfg)
 
 
@@ -165,9 +171,8 @@ def main() -> None:
         if preds.empty:
             st.info("No settled predictions yet — the ledger fills as `paper`/`autopilot` runs.")
         else:
-            from .postmortem import calibration_bins
+            from sportsedge.postmortem import calibration_bins, IDX
             pf = preds[["pf_h", "pf_d", "pf_a"]].to_numpy()
-            from .postmortem import IDX
             y = preds.outcome.map(IDX).to_numpy()
             bins = calibration_bins(pf, y)
             st.dataframe(pd.DataFrame(bins), use_container_width=True)
@@ -204,8 +209,8 @@ def main() -> None:
         if not os.path.isdir(raw):
             st.warning("No data directory. Run `python -m sportsedge fetch` first.")
         elif st.button("Run backtest", type="primary"):
-            from . import data
-            from .backtest import run_backtest, summarize
+            from sportsedge import data
+            from sportsedge.backtest import run_backtest, summarize
             hist = data.load_history(raw)
             prog = st.progress(0.0, text="running...")
             for i, (div, g) in enumerate(hist.groupby("Div")):

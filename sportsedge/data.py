@@ -7,9 +7,16 @@ import requests
 BASE = "https://www.football-data.co.uk"
 
 
+def _clean_cols(df: pd.DataFrame) -> pd.DataFrame:
+    """Strip a BOM (or its latin-1 mojibake 'ï»¿') that some feeds put before the first header."""
+    df.columns = [str(c).lstrip("﻿ï»¿").strip() for c in df.columns]
+    return df
+
+
 def _read(content: bytes) -> pd.DataFrame:
     df = pd.read_csv(io.StringIO(content.decode("latin-1")), on_bad_lines="skip")
     df = df.dropna(subset=["HomeTeam", "AwayTeam"])
+    df = _clean_cols(df)
     df["Date"] = pd.to_datetime(df["Date"], dayfirst=True, errors="coerce")
     return df.dropna(subset=["Date"])
 
@@ -59,6 +66,9 @@ def load_fixtures(raw_dir, cfg=None) -> pd.DataFrame:
     if not os.path.exists(p):
         raise SystemExit("No fixtures. Run: python -m sportsedge fetch")
     fx = pd.read_csv(p, parse_dates=["Date"])
+    fx = _clean_cols(fx)
+    if "div" in fx.columns and "Div" not in fx.columns:  # football-data fixtures.csv uses lowercase div
+        fx = fx.rename(columns={"div": "Div"})
     if cfg is not None:
         from .oddsfeed import apply_local_odds
         fx = apply_local_odds(fx, "data/external/local_odds.csv", cfg)
