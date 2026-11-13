@@ -1,5 +1,5 @@
 from __future__ import annotations
-import argparse, datetime as dt, os, yaml, pandas as pd
+import argparse, datetime as dt, json, os, yaml, pandas as pd
 from . import data, learning, postmortem, markets as mk
 from .backtest import run_backtest, summarize
 from .broker import PaperBroker
@@ -77,6 +77,24 @@ def _brokers(cfg, ledger):
     return paper, pm
 
 
+def _lineup_gate(cfg: dict, ext, bet: dict) -> bool:
+    """Phase 2 item 7: pre-publish lineup/injury gate. Returns True when the pick may be published.
+    Impact scale: ~1 = a key starter out, 2+ = several key players out."""
+    thresh = float(cfg.get("external", {}).get("publish_impact_threshold", 2.0))
+    impact = ext.impact(bet["home"], dt.date.today()) + ext.impact(bet["away"], dt.date.today())
+    if impact >= thresh:
+        d = cfg.get("learning", {}).get("models_dir", "models")
+        os.makedirs(d, exist_ok=True)
+        with open(os.path.join(d, "publish_gate_log.jsonl"), "a") as f:
+            f.write(json.dumps({"ts": dt.datetime.utcnow().isoformat(), "home": bet["home"], "away": bet["away"],
+                                "market": bet.get("market"), "selection": bet.get("selection"),
+                                "impact": impact, "threshold": thresh, "action": "not_published"}, default=str) + "\n")
+        print(f"lineup gate: NOT publishing {bet['home']} v {bet['away']} ({bet.get('selection')}) "
+              f"— injury impact {impact:.1f} >= {thresh}")
+        return False
+    return True
+
+
 def cmd_predict(cfg, record: bool, publish: bool = False):
     if (record or publish) and os.path.exists("STOP"):
         print("STOP file present: autopilot paused. Read it, fix the cause, then delete STOP.")
@@ -91,7 +109,8 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
     if fx.empty:
         print("no upcoming fixtures. Run: python -m sportsedge fetch  (or `odds` with ODDS_API_KEY)")
         return
-    preds = make_predictors(hist, cfg, load_provider(cfg))
+    provider = load_provider(cfg)
+    preds = make_predictors(hist, cfg, provider)
     ledger = Ledger(cfg["paths"]["ledger"]) if record else None
     paper, pm_broker = _brokers(cfg, ledger) if record else (None, None)
     b = cfg["betting"]
@@ -128,7 +147,12 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
             collected = []
     from itertools import groupby
     for day, day_bets in groupby(sorted(collected, key=lambda t: t[0]), key=lambda t: t[0]):
-        bets = allocate([bet for _, bet in day_bets], bankroll, b)
+        bets = [bet for _, bet in day_bets]
+        pending = [dict(match=(bet["home"], bet["away"]), league=bet["div"], market=bet["market"], stake=bet["stake"])
+                   for bet in bets]
+        allocate(pending, bankroll, b)
+        for bet, p in zip(bets, pending):
+            bet["stake"] = p["stake"]
         for bet in bets:
             s = bet["stake"]
             if s <= 0:
@@ -153,6 +177,8 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
         tg = TelegramPublisher()
         posted_now = []   # bets actually posted in THIS run (new picks + sweep) — the digest covers exactly these
         for bet in slips:  # one post per pick so each can be edited later
+            if not _lineup_gate(cfg, provider, bet):
+                continue   # lineup/news gate: downgrade, never publish
             ids = tg.post(format_bet(bet))
             if ids and ids[0] > 0:
                 posted_now.append(bet)
@@ -167,6 +193,8 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
                 bet = dict(home=h, away=a, date=d, div=div, market=m, selection=s, line=line,
                            odds=odds, stake=stk, prob=prob, edge=edge, venue=venue,
                            stake_pct=100 * stk / bankroll)
+                if not _lineup_gate(cfg, provider, bet):
+                    continue   # lineup/news gate: downgrade, never publish
                 ids = tg.post(format_bet(bet))
                 if ids and ids[0] > 0:
                     posted_now.append(bet)

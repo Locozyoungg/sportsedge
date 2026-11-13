@@ -1,6 +1,7 @@
 """Tests for the Phase 4 service layer: ledger CLV/message ids, publish + withdraw flow,
 shadow challenger research, drift detection, dashboard helpers."""
 import copy
+import datetime as dt
 import json
 
 import numpy as np
@@ -404,6 +405,31 @@ def test_odds_timestamp_stored_with_bet(tmp_path):
                odds=2.0, stake=5, prob=0.5, edge=0.0, div="E0", odds_ts="2026-11-14T08:00:00")
     assert led.add(bet)
     assert led.db.execute("SELECT odds_ts FROM bets").fetchone()[0] == "2026-11-14T08:00:00"
+
+
+def test_lineup_gate_blocks_publish_on_high_injury_impact(tmp_path, monkeypatch):
+    """Phase 2 item 7: picks on matches with high injury impact are downgraded — never posted, logged."""
+    from sportsedge.external import CsvInjuryProvider
+    c = cfg_tmp(tmp_path)
+    df, fx = _setup_pipeline(tmp_path, c)
+    inj = tmp_path / "inj.csv"
+    home = fx.iloc[0].HomeTeam
+    inj.write_text(f"date,team,impact,source\n{dt.date.today()},{home},2.5,https://example.com/news\n",
+                   encoding="utf-8")
+    c["external"] = {"injuries_csv": str(inj), "publish_impact_threshold": 2.0}
+    c["betting"]["min_edge"] = -1.0
+    c["betting"]["max_odds"] = 50.0   # guarantee the injured team's match has a pick to gate
+    fake = FakeTG()
+    monkeypatch.setattr(cli, "TelegramPublisher", lambda: fake)
+    _no_env(monkeypatch)
+    monkeypatch.chdir(tmp_path)
+    cli.cmd_predict(c, record=True, publish=True)
+    gated = [t for t in fake.posted if home in t and "Pick:" in t]
+    # the injured team's home pick was never posted; other matches were
+    assert gated == []
+    log = open(tmp_path / "models" / "publish_gate_log.jsonl", encoding="utf-8").read()
+    assert "not_published" in log and home in log
+    assert fake.posted  # other picks still went out
 
 
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):

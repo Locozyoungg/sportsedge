@@ -16,6 +16,7 @@ stack:
   weights: {logreg: 0.5, hgb: 0.5}
 external:
   injuries_csv: data/external/injuries.csv   # optional; see injuries.csv.example
+  publish_impact_threshold: 2.0              # Phase 2 item 7: picks on matches with this much injury impact are not published
 betting:
   # Venues = where you can actually get a price. Columns hold decimal odds (H, D, A).
   venues:
