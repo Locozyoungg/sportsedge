@@ -1,0 +1,8 @@
+.env
+data/raw/*
+data/*.sqlite
+data/.autopilot.lock
+__pycache__/
+*.pyc
+STOP
+reports/
