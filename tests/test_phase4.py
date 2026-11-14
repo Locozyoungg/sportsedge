@@ -441,6 +441,15 @@ def test_format_bet_shows_book_when_known():
     assert "book" not in format_bet(dict(b, book=None)).replace("bookmaker", "")
 
 
+def test_backtest_includes_market_only_baseline(tmp_path):
+    """Phase 4: every backtest also simulates the de-vigged-market-only betting baseline."""
+    from sportsedge.backtest import run_backtest, summarize
+    c = cfg_tmp(tmp_path)
+    r = run_backtest(synth(seasons=2), c)
+    assert "n_bets_market" in r and "roi_market" in r and "roi_ci95_market" in r
+    assert "MARKET-ONLY" in summarize(r)
+
+
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHANNEL_ID", raising=False)

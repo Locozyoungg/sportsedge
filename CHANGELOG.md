@@ -2,6 +2,9 @@
 
 All notable changes to SportsEdge. One line per change; each change ships with a test.
 
+## Phase 4 — backtest & validation (2026-11-14)
+- feat: every backtest now also simulates the market-only baseline (de-vigged consensus vs bookmaker prices, same filters/staking) for the honest out-of-sample comparison
+
 ## Phase 3 — self-evaluation loop (2026-11-14)
 - feat: weekly report (Brier, log loss, calibration bins, ROI, CLV, drawdown) segmented by league/market/odds-range/edge-bucket (`weekly`)
 - feat: safe auto-adjustment — per-segment stake multiplier REDUCTIONS on negative CLV (100+ picks), pauses on calibration bias > 0.05 (300+ picks), post-blend isotonic recalibration (300+ picks); every change logged with before/after and snapshot-rollback (`segments-status`, `segments-rollback`)

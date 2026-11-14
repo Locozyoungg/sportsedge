@@ -1,5 +1,6 @@
 """Walk-forward backtest over all enabled markets. Never trains on data from the future."""
 from __future__ import annotations
+import copy
 import numpy as np
 import pandas as pd
 from . import markets as mk
@@ -15,7 +16,9 @@ def _logloss(p, y):
     return -np.log(np.clip(p[np.arange(len(y)), y], 1e-9, 1)).mean()
 
 
-def run_backtest(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame | None = None) -> dict:
+def _simulate(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame | None = None) -> dict:
+    """One walk-forward simulation: per-league model refit per window, picks, Kelly stakes, caps, settle.
+    Returns predictions log loss + the bet log. Shared by the blend strategy and the market-only baseline."""
     df = df.sort_values("Date")
     mcfg, bcfg, kc = cfg["model"], cfg["betting"], cfg["backtest"]
     if len(df) <= kc["min_train_matches"]:
@@ -107,6 +110,32 @@ def run_backtest(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame
     return out
 
 
+def run_backtest(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame | None = None) -> dict:
+    """Phase 4: the configured strategy AND the market-only baseline (de-vigged consensus vs bookmaker
+    prices, same filters and staking), simulated with the same walk-forward windows."""
+    out = _simulate(df, cfg, seed, table)
+    if "error" in out:
+        return out
+    cfg_m = copy.deepcopy(cfg)
+    cfg_m["model"]["market_weight"] = 1.0   # probabilities = de-vigged market; the honest betting baseline
+    m = _simulate(df, cfg_m, seed, table)
+    bm = m.get("bets", pd.DataFrame())
+    if len(bm):
+        out.update(n_bets_market=len(bm), profit_market=float(bm.pnl.sum()),
+                   roi_market=float(bm.pnl.sum() / bm.stake.sum()) if bm.stake.sum() else 0.0,
+                   hit_rate_market=float(bm.won.mean()), max_drawdown_market=_drawdown(bm))
+        rng = np.random.default_rng(seed)
+        ratio = (bm.pnl / bm.stake).to_numpy()
+        boots = [rng.choice(ratio, len(ratio)).mean() for _ in range(2000)]
+        out["roi_ci95_market"] = (float(np.percentile(boots, 2.5)), float(np.percentile(boots, 97.5)))
+    return out
+
+
+def _drawdown(b: pd.DataFrame) -> float:
+    peak = b.bankroll.cummax()
+    return float(((b.bankroll - peak) / peak).min())
+
+
 def summarize(res: dict) -> str:
     if "error" in res:
         return res["error"]
@@ -123,6 +152,12 @@ def summarize(res: dict) -> str:
                   "by market          : " + ", ".join(f"{m} n={v['n']} ROI {v['roi']:.1%}" for m, v in res["by_market"].items())]
         if lo <= 0 <= hi:
             lines.append("VERDICT: ROI is statistically indistinguishable from zero. Do not bet real money.")
+    if "n_bets_market" in res:
+        mlo, mhi = res["roi_ci95_market"]
+        lines += [f"MARKET-ONLY baseline: {res['n_bets_market']} bets, ROI {res['roi_market']:.2%} "
+                  f"95% CI [{mlo:.2%}, {mhi:.2%}], hit rate {res['hit_rate_market']:.1%}, "
+                  f"max DD {res['max_drawdown_market']:.1%}",
+                  "  (if the blend does not beat this baseline on log loss and ROI, the model adds no value)"]
     else:
         lines.append("No bets passed the filters.")
     return "\n".join(lines)
