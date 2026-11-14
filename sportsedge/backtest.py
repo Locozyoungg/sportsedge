@@ -159,5 +159,6 @@ def summarize(res: dict) -> str:
                   f"max DD {res['max_drawdown_market']:.1%}",
                   "  (if the blend does not beat this baseline on log loss and ROI, the model adds no value)"]
     else:
-        lines.append("No bets passed the filters.")
+        lines.append("MARKET-ONLY baseline: no bets passed the filters (the de-vigged consensus rarely "
+                     "disagrees with the bookmaker by min_edge — worth knowing).")
     return "\n".join(lines)
