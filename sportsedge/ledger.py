@@ -12,6 +12,7 @@ SCHEMA = """CREATE TABLE IF NOT EXISTS bets(
  market TEXT, selection TEXT, odds REAL, stake REAL, prob REAL, edge REAL,
  status TEXT DEFAULT 'open', pnl REAL, mode TEXT, line REAL, venue TEXT, ref TEXT,
  div TEXT, clv REAL, message_id INTEGER, odds_ts TEXT, book TEXT, p_market REAL, closing_odds REAL,
+ p_model REAL,
  UNIQUE(match_date, home, away, market, selection, mode))"""
 
 
@@ -31,7 +32,8 @@ class Ledger:
         for col, typ in (("line", "REAL"), ("venue", "TEXT"), ("ref", "TEXT"),
                          ("div", "TEXT"), ("clv", "REAL"), ("message_id", "INTEGER"),
                          ("odds_ts", "TEXT"), ("book", "TEXT"),
-                         ("p_market", "REAL"), ("closing_odds", "REAL")):   # migrate older ledgers
+                         ("p_market", "REAL"), ("closing_odds", "REAL"),
+                         ("p_model", "REAL")):   # migrate older ledgers
             try:
                 self.db.execute(f"ALTER TABLE bets ADD COLUMN {col} {typ}")
             except sqlite3.OperationalError:
@@ -40,11 +42,11 @@ class Ledger:
     def add(self, bet: dict, mode="paper") -> bool:
         try:
             self.db.execute(
-                "INSERT INTO bets(ts,match_date,home,away,market,selection,odds,stake,prob,edge,mode,line,venue,ref,div,odds_ts,book,p_market) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO bets(ts,match_date,home,away,market,selection,odds,stake,prob,edge,mode,line,venue,ref,div,odds_ts,book,p_market,p_model) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (dt.datetime.utcnow().isoformat(), str(bet["date"])[:10], bet["home"], bet["away"], bet.get("market", "1X2"),
                  bet["selection"], bet["odds"], bet["stake"], bet["prob"], bet["edge"], mode,
                  bet.get("line"), bet.get("venue", "bookmaker"), bet.get("ref"), bet.get("div"),
-                 bet.get("odds_ts"), bet.get("book"), bet.get("p_market")))
+                 bet.get("odds_ts"), bet.get("book"), bet.get("p_market"), bet.get("p_model")))
             self.db.commit()
             return True
         except sqlite3.IntegrityError:
@@ -120,7 +122,7 @@ class Ledger:
     def unposted_bets(self, since_date: str):
         """Open bets with no message_id yet (dry-run runs, failed posts). id, bet fields, prob, edge, stake."""
         return self.db.execute(
-            "SELECT id,match_date,home,away,market,selection,line,odds,stake,prob,edge,venue,div FROM bets "
+            "SELECT id,match_date,home,away,market,selection,line,odds,stake,prob,edge,venue,div,p_market,p_model FROM bets "
             "WHERE status='open' AND message_id IS NULL AND match_date>=? ORDER BY match_date", (since_date,)).fetchall()
 
     def withdraw(self, bid):

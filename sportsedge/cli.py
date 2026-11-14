@@ -77,11 +77,17 @@ def _brokers(cfg, ledger):
     return paper, pm
 
 
+def _match_impact(cfg: dict, ext, bet: dict) -> float:
+    """Summed injury impact for the match (Phase 2 gate + Phase 5 caveat share this)."""
+    return ext.impact(bet["home"], dt.date.today()) + ext.impact(bet["away"], dt.date.today())
+
+
 def _lineup_gate(cfg: dict, ext, bet: dict) -> bool:
     """Phase 2 item 7: pre-publish lineup/injury gate. Returns True when the pick may be published.
     Impact scale: ~1 = a key starter out, 2+ = several key players out."""
     thresh = float(cfg.get("external", {}).get("publish_impact_threshold", 2.0))
-    impact = ext.impact(bet["home"], dt.date.today()) + ext.impact(bet["away"], dt.date.today())
+    impact = _match_impact(cfg, ext, bet)
+    bet["injury_impact"] = impact   # Phase 5: shown as a caveat on the post
     if impact >= thresh:
         d = cfg.get("learning", {}).get("models_dir", "models")
         os.makedirs(d, exist_ok=True)
@@ -145,14 +151,18 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
             top = sorted(((f"{i}-{j}", float(grid[i, j])) for i in range(4) for j in range(4)), key=lambda t: -t[1])[:3]
             sel = bet["selection"]
             pm_sel = None   # devigged market probability for the selection (Phase 3 ledger)
+            p_model = None  # calibrated model probability for the selection (Phase 5 posts)
             if bet["market"] in ("1X2", "PM:1X2"):
                 pm_sel = float(x2["market"]["HDA".index(sel)])
+                p_model = float(x2["model"]["HDA".index(sel)])
             elif bet["market"] == "OU25" and "ou" in pr:
                 pm_sel = float(pr["ou"]["market"] if sel == "O" else 1 - pr["ou"]["market"])
+                p_model = float(pr["ou"]["model"] if sel == "O" else 1 - pr["ou"]["model"])
             elif bet["market"] == "AH" and "ah" in pr:
                 pm_sel = float(pr["ah"]["market"] if sel == "H" else 1 - pr["ah"]["market"])
+                p_model = float(pr["ah"]["model"] if sel == "H" else 1 - pr["ah"]["model"])
             bet.update(stake=s, home=row.HomeTeam, away=row.AwayTeam, date=row.Date, div=row["Div"],
-                       xg=pred.xg(row), top_scores=top, odds_ts=odds_ts, p_market=pm_sel,
+                       xg=pred.xg(row), top_scores=top, odds_ts=odds_ts, p_market=pm_sel, p_model=p_model,
                        book=row.get(f"Book{sel}") if bet["market"] in ("1X2", "OU25") and sel in "HDAOU" else None,
                        ref=row.get(f"PM_TOKEN_{sel}") if bet["venue"] == "polymarket" else None)
             collected.append((row.Date, bet))
@@ -206,10 +216,10 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
         # sweep: bets in the ledger that were never posted (dry run, earlier failure) — post them now
         if record:
             for row in ledger.unposted_bets(str(dt.date.today())):
-                (bid, d, h, a, m, s, line, odds, stk, prob, edge, venue, div) = row
+                (bid, d, h, a, m, s, line, odds, stk, prob, edge, venue, div, p_market, p_model) = row
                 bet = dict(home=h, away=a, date=d, div=div, market=m, selection=s, line=line,
                            odds=odds, stake=stk, prob=prob, edge=edge, venue=venue,
-                           stake_pct=100 * stk / bankroll)
+                           stake_pct=100 * stk / bankroll, p_market=p_market, p_model=p_model)
                 if not _lineup_gate(cfg, provider, bet):
                     continue   # lineup/news gate: downgrade, never publish
                 ids = tg.post(format_bet(bet))
@@ -373,6 +383,12 @@ def cmd_segments_status(cfg):
     print(json.dumps(_load_state(), indent=2, default=str))
 
 
+def cmd_track_record(cfg, days: int = 90):
+    """Phase 5: weekly public track-record post (record, ROI, CLV, calibration, drawdown — losses included)."""
+    from .report import format_track_record
+    TelegramPublisher().send(format_track_record(cfg, Ledger(cfg["paths"]["ledger"]), days))
+
+
 def cmd_shadow(cfg):
     """Shadow research: log challenger probabilities for upcoming fixtures, settle old ones, propose promotions."""
     from .challengers import run_shadow, settle_shadow, propose_text
@@ -420,6 +436,7 @@ def cmd_autopilot(cfg):
     cmd_predict(cfg, record=True, publish=True)
     if dt.date.today().weekday() == 0:
         cmd_results(cfg, 7)
+        cmd_track_record(cfg)
 
 
 def main():
@@ -429,7 +446,7 @@ def main():
     ap.add_argument("cmd", choices=["fetch", "validate", "backtest", "predict", "paper", "settle", "publish", "results",
                                     "telegram-test", "postmortem", "health", "learn", "rollback", "autopilot",
                                     "odds", "polymarket-scan", "polymarket-geocheck", "withdraw", "monthly",
-                                    "shadow", "weekly", "segments-status", "segments-rollback"])
+                                    "shadow", "weekly", "segments-status", "segments-rollback", "track-record"])
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--version", type=int)
@@ -449,4 +466,5 @@ def main():
      "withdraw": lambda: cmd_withdraw(cfg), "monthly": lambda: cmd_monthly(cfg, a.days),
      "shadow": lambda: cmd_shadow(cfg), "weekly": lambda: cmd_weekly(cfg),
      "segments-status": lambda: cmd_segments_status(cfg),
-     "segments-rollback": lambda: __import__("sportsedge.eval", fromlist=["rollback"]).rollback(cfg, a.ts)}[a.cmd]()
+     "segments-rollback": lambda: __import__("sportsedge.eval", fromlist=["rollback"]).rollback(cfg, a.ts),
+     "track-record": lambda: cmd_track_record(cfg, a.days)}[a.cmd]()

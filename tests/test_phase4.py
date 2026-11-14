@@ -450,6 +450,38 @@ def test_backtest_includes_market_only_baseline(tmp_path):
     assert "MARKET-ONLY" in summarize(r)
 
 
+def test_phase5_pick_post_has_all_required_fields():
+    """Phase 5: every pick post carries market, odds+book, model prob, market prob, edge, stake,
+    confidence flag, odds timestamp, and any lineup caveat."""
+    from sportsedge.report import format_bet
+    b = dict(home="A", away="B", date="2026-11-14", div="E0", market="1X2", selection="H",
+             odds=1.9, prob=0.55, edge=0.09, stake_pct=1.0, book="bet365",
+             p_model=0.50, p_market=0.48, odds_ts="2026-11-14T08:00:00", injury_impact=0.8)
+    msg = format_bet(b)
+    for need in ("Pick:", "bet365", "Model 50%", "market (de-vigged) 48%", "edge <b>9.0%</b>",
+                 "confidence: HIGH", "Odds snapshot", "2026-11-14 08:00", "Lineup caveat", "of bankroll"):
+        assert need in msg, (need, msg)
+    b2 = dict(b, edge=0.03)
+    assert "confidence: STANDARD" in format_bet(b2)
+
+
+def test_track_record_post_includes_losses_and_metrics(tmp_path, monkeypatch):
+    """Phase 5: the weekly track-record post shows the full record - wins AND losses - plus
+    ROI, CLV, calibration and drawdown, and the responsible-gambling footer."""
+    from sportsedge.report import format_track_record
+    c = cfg_tmp(tmp_path)
+    led = Ledger(c["paths"]["ledger"])
+    led.add(dict(date="2026-11-10", home="A", away="B", market="1X2", selection="H",
+                 odds=2.0, stake=10, prob=0.55, edge=0.1, div="E0"))
+    led.add(dict(date="2026-11-11", home="C", away="D", market="1X2", selection="H",
+                 odds=2.0, stake=10, prob=0.55, edge=0.1, div="E0"))
+    led.settle_pnl(1, 10.0, clv=0.02, closing_odds=0.5)   # a win
+    led.settle_pnl(2, -10.0, clv=-0.02, closing_odds=0.5)  # and a loss
+    msg = format_track_record(c, led)
+    for need in ("Track record", "ROI", "Closing-line value", "Calibration", "drawdown", "not guaranteed"):
+        assert need in msg, (need, msg)
+
+
 def test_telegram_post_returns_ids_and_edit_dry_run(monkeypatch, capsys):
     monkeypatch.delenv("TELEGRAM_BOT_TOKEN", raising=False)
     monkeypatch.delenv("TELEGRAM_CHANNEL_ID", raising=False)

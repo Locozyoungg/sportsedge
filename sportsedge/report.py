@@ -17,6 +17,11 @@ def pick_label(b: dict) -> str:
     return {"H": f"{e(b['home'])} to win", "D": "Draw", "A": f"{e(b['away'])} to win"}[sel]
 
 
+def confidence(edge: float) -> str:
+    """Honest flag: HIGH only for edges well above the usual noise floor."""
+    return "HIGH" if edge >= 0.08 else "STANDARD"
+
+
 def format_bet(b: dict) -> str:
     imp = 1 / b["odds"]
     book = f" <i>({e(b['book'])})</i>" if b.get("book") else ""
@@ -24,8 +29,15 @@ def format_bet(b: dict) -> str:
         f"<b>{e(b['home'])} vs {e(b['away'])}</b>  <i>({e(str(b.get('div', '')))} · {str(b['date'])[:10]})</i>",
         f"Pick: <b>{pick_label(b)}</b> @ <b>{b['odds']:.2f}</b>{book}"
         + (" <i>(Polymarket YES)</i>" if b.get("venue") == "polymarket" else ""),
-        f"Our probability {b['prob']:.0%} vs odds-implied {imp:.0%} → edge <b>{b['edge']:.1%}</b>",
+        f"Our probability {b['prob']:.0%} vs odds-implied {imp:.0%} → edge <b>{b['edge']:.1%}</b>"
+        f"  <i>(confidence: {confidence(b['edge'])})</i>",
     ]
+    if b.get("p_model") is not None and b.get("p_market") is not None:
+        lines.append(f"Model {b['p_model']:.0%} · market (de-vigged) {b['p_market']:.0%}")
+    if b.get("odds_ts"):
+        lines.append(f"Odds snapshot: <i>{b['odds_ts'][:16].replace('T', ' ')}</i>")
+    if b.get("injury_impact"):
+        lines.append(f"⚠️ Lineup caveat: combined injury impact {b['injury_impact']:.1f}")
     if b.get("xg"):
         lines.append(f"Expected goals {b['xg'][0]:.2f} – {b['xg'][1]:.2f}; likeliest scores "
                      + ", ".join(f"{s} ({p:.0%})" for s, p in b.get("top_scores", [])))
@@ -40,6 +52,37 @@ def format_digest(bets: list[dict], channel: str = "Premium Picks", day: str = "
     head = f"<b>{e(channel)}</b> {e(day)}\n{len(bets)} value pick(s) today\n"
     body = "\n\n".join(format_bet(b) for b in sorted(bets, key=lambda x: -x["edge"]))
     return f"{head}\n{body}\n\n{DISCLAIMER}"
+
+
+def format_track_record(cfg: dict, ledger, days: int = 90) -> str:
+    """Phase 5: the weekly public track-record post — record, ROI, CLV, calibration, drawdown.
+    Includes every settled result in the window (wins AND losses). No cherry-picking."""
+    import pandas as pd
+    from .eval import overall
+    bets = ledger.settled_bets()
+    if not len(bets):
+        return f"<b>Track record</b>\nNo settled picks yet.\n\n{DISCLAIMER}"
+    window = bets[pd.to_datetime(bets.match_date) >= pd.Timestamp.now().normalize() - pd.Timedelta(days=days)]
+    use = window if len(window) else bets
+    o = overall(use, cfg["betting"]["bankroll"])
+    out = [f"<b>📊 Track record — last {days} days</b>", ""]
+    if not o.get("n"):
+        return f"<b>📊 Track record</b>\nNo settled picks in the window.\n\n{DISCLAIMER}"
+    clv = f"{o['clv']:+.1%}" if pd.notna(o["clv"]) else "n/a"
+    out += [f"Settled picks: {o['n']} | ROI/yield {o['roi']:+.1%} | P&L {o['pnl']:+.2f}",
+            f"Closing-line value: <b>{clv}</b> (the honest skill measure) | max drawdown {o['max_drawdown']:.1%}",
+            f"Brier {o['brier']:.3f} | log loss {o['ll']:.3f}", "",
+            "<i>Calibration (predicted vs actual hit rate):</i>"]
+    for c in o["calibration"][:6]:
+        out.append(f"· {c['range']}: {c['predicted']:.0%} vs {c['actual']:.0%} (n={c['n']})")
+    by_league = use.groupby("div").apply(lambda g: float(g.pnl.sum() / g.stake.sum()) if g.stake.sum() else 0.0)
+    if len(by_league):
+        out.append("")
+        out.append("<i>ROI by league:</i> " + " · ".join(f"{k}: {v:+.1%}" for k, v in by_league.items()))
+    out.append("")
+    out.append(DISCLAIMER)
+    out.append("<i>Full audited history: every pick, result and odds snapshot is in the public record.</i>")
+    return "\n".join(out)
 
 
 def format_results(rows, days: int, bankroll: float, totals, clv=None, drawdown=None) -> str:
