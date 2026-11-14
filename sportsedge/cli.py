@@ -132,11 +132,26 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
             s = stake(bankroll, bet["prob"], bet["odds"], b, bet["scale"])
             if s <= 0:
                 continue
+            if record or publish:   # segment registry is live paper-path state, not part of the backtest
+                from .eval import apply_segment
+                bet = apply_segment(bet, cfg, row["Div"])
+                if bet["stake"] <= 0 or bet["edge"] < b["min_edge"]:
+                    if bet.get("paused_segment"):
+                        print(f"   ~~ segment paused [{bet['paused_segment']}]: skipping {row.HomeTeam} v {row.AwayTeam}")
+                    continue
+                s = bet["stake"]
             grid = pred.grid(row)
             top = sorted(((f"{i}-{j}", float(grid[i, j])) for i in range(4) for j in range(4)), key=lambda t: -t[1])[:3]
             sel = bet["selection"]
+            pm_sel = None   # devigged market probability for the selection (Phase 3 ledger)
+            if bet["market"] in ("1X2", "PM:1X2"):
+                pm_sel = float(x2["market"]["HDA".index(sel)])
+            elif bet["market"] == "OU25" and "ou" in pr:
+                pm_sel = float(pr["ou"]["market"] if sel == "O" else 1 - pr["ou"]["market"])
+            elif bet["market"] == "AH" and "ah" in pr:
+                pm_sel = float(pr["ah"]["market"] if sel == "H" else 1 - pr["ah"]["market"])
             bet.update(stake=s, home=row.HomeTeam, away=row.AwayTeam, date=row.Date, div=row["Div"],
-                       xg=pred.xg(row), top_scores=top, odds_ts=odds_ts,
+                       xg=pred.xg(row), top_scores=top, odds_ts=odds_ts, p_market=pm_sel,
                        book=row.get(f"Book{sel}") if bet["market"] in ("1X2", "OU25") and sel in "HDAOU" else None,
                        ref=row.get(f"PM_TOKEN_{sel}") if bet["venue"] == "polymarket" else None)
             collected.append((row.Date, bet))
@@ -272,17 +287,34 @@ def cmd_settle(cfg):
     hist = data.load_history(cfg["paths"]["raw_dir"])
     led = Ledger(cfg["paths"]["ledger"])
     led.settle_predictions(hist)
+    from .odds import devig_power, get_odds
+    b = cfg["betting"]
     for bid, d, home, away, market, sel, line, odds, stk in led.open_bets():
         m = hist[(hist.Date == pd.Timestamp(d)) & (hist.HomeTeam == home) & (hist.AwayTeam == away)]
         if len(m):
             r = m.iloc[0]
-            clv = None
+            clv, closing = None, None
             if market == "1X2" and sel in "HDA":
-                from .odds import devig_power, get_odds
-                close = get_odds(r, cfg["betting"]["closing_cols"])
+                close = get_odds(r, b["closing_cols"])
                 if close is not None:
-                    clv = float(odds * devig_power(close)["HDA".index(sel)] - 1)
-            led.settle_pnl(bid, mk.pnl(market, sel, line, int(r.FTHG), int(r.FTAG), stk, odds), clv)
+                    dev = devig_power(close)
+                    closing = float(dev["HDA".index(sel)])
+                    clv = float(odds * closing - 1)
+            elif market in ("OU25", "OU"):
+                c = b["markets"]["ou"]
+                close = get_odds(r, [c["sharp_over"], c["sharp_under"]])
+                if close is not None:
+                    dev = devig_power(close)
+                    closing = float(dev[0] if sel == "O" else dev[1])
+                    clv = float(odds * closing - 1)
+            elif market == "AH":
+                c = b["markets"]["ah"]
+                close = get_odds(r, [c["sharp_home"], c["sharp_away"]])
+                if close is not None:
+                    dev = devig_power(close)
+                    closing = float(dev[0] if sel == "H" else dev[1])
+                    clv = float(odds * closing - 1)
+            led.settle_pnl(bid, mk.pnl(market, sel, line, int(r.FTHG), int(r.FTAG), stk, odds), clv, closing)
     n, staked, pnl = led.report()
     print(f"settled bets {n}  staked {staked:.2f}  pnl {pnl:.2f}  ROI {(pnl / staked if staked else 0):.2%}")
 
@@ -319,6 +351,25 @@ def cmd_learn(cfg, force=False):
     print({k: v for k, v in d.items() if k not in ("champion_cal", "challenger_cal")})
     admin().send(f"<b>Learning run</b>: {d['decision']}. {d.get('reason', '')}")
     return d
+
+
+def cmd_weekly(cfg):
+    """Phase 3: weekly report + safe auto-adjustment (reductions/pauses only)."""
+    from .eval import weekly_report, auto_adjust
+    led = Ledger(cfg["paths"]["ledger"])
+    md = weekly_report(cfg, led)
+    print(md)
+    adj = auto_adjust(cfg, led)
+    lines = [f"<b>Segment auto-adjust</b>: {adj['changed']} change(s)"]
+    for c in adj.get("changes", []):
+        lines.append(f"- {c['segment']}: {c['action']} ({c['reason']})")
+    admin().send("\n".join(lines) + "\nEvery change is logged and reversible (segments-rollback).")
+    return adj
+
+
+def cmd_segments_status(cfg):
+    from .eval import _load_state
+    print(json.dumps(_load_state(), indent=2, default=str))
 
 
 def cmd_shadow(cfg):
@@ -360,6 +411,11 @@ def cmd_autopilot(cfg):
         cmd_shadow(cfg)
     except Exception as e:
         print("shadow research failed (continuing without it):", e)
+    if dt.date.today().weekday() == 0:
+        try:
+            cmd_weekly(cfg)
+        except Exception as e:
+            print("weekly evaluation failed (continuing without it):", e)
     cmd_predict(cfg, record=True, publish=True)
     if dt.date.today().weekday() == 0:
         cmd_results(cfg, 7)
@@ -372,10 +428,11 @@ def main():
     ap.add_argument("cmd", choices=["fetch", "validate", "backtest", "predict", "paper", "settle", "publish", "results",
                                     "telegram-test", "postmortem", "health", "learn", "rollback", "autopilot",
                                     "odds", "polymarket-scan", "polymarket-geocheck", "withdraw", "monthly",
-                                    "shadow"])
+                                    "shadow", "weekly", "segments-status", "segments-rollback"])
     ap.add_argument("--config", default="config.yaml")
     ap.add_argument("--days", type=int, default=7)
     ap.add_argument("--version", type=int)
+    ap.add_argument("--ts", default="")
     ap.add_argument("--force", action="store_true")
     a = ap.parse_args()
     cfg = load_cfg(a.config)
@@ -389,4 +446,6 @@ def main():
      "autopilot": lambda: cmd_autopilot(cfg), "odds": lambda: cmd_odds(cfg),
      "polymarket-scan": lambda: cmd_polymarket_scan(cfg), "polymarket-geocheck": lambda: cmd_polymarket_geocheck(cfg),
      "withdraw": lambda: cmd_withdraw(cfg), "monthly": lambda: cmd_monthly(cfg, a.days),
-     "shadow": lambda: cmd_shadow(cfg)}[a.cmd]()
+     "shadow": lambda: cmd_shadow(cfg), "weekly": lambda: cmd_weekly(cfg),
+     "segments-status": lambda: cmd_segments_status(cfg),
+     "segments-rollback": lambda: __import__("sportsedge.eval", fromlist=["rollback"]).rollback(cfg, a.ts)}[a.cmd]()

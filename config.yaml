@@ -80,6 +80,10 @@ learning:
   try_stack: true
   shadow_min_matches: 300     # challengers need this many settled shadow predictions before promotion can be proposed
   shadow_ci: 0.9
+  segments:                  # Phase 3 self-evaluation: auto-adjustment bounds (reductions/pauses only)
+    min_recal: 300           # recalibrate a segment's probabilities only after this many settled picks
+    min_clv_n: 100           # reduce the segment stake multiplier after this many picks with negative CLV
+    pause_bias: 0.05         # pause a segment when |mean prob - win rate| exceeds this
   grid:
     half_life_days: [120, 200, 320]
     reg: [0.2, 0.5, 1.0]
