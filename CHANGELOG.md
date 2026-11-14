@@ -2,6 +2,10 @@
 
 All notable changes to SportsEdge. One line per change; each change ships with a test.
 
+## Phase 5 — publishing format (2026-11-14)
+- feat: every pick post now shows market, odds + book, model probability, de-vigged market probability, edge, stake, confidence flag (HIGH/STANDARD), odds snapshot time and lineup caveat
+- feat: weekly track-record channel post (record, ROI, CLV, calibration, drawdown; wins AND losses; responsible-gambling footer)
+
 ## Phase 4 — backtest & validation (2026-11-14)
 - feat: every backtest now also simulates the market-only baseline (de-vigged consensus vs bookmaker prices, same filters/staking) for the honest out-of-sample comparison
 
