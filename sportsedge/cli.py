@@ -132,6 +132,7 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
             s = stake(bankroll, bet["prob"], bet["odds"], b, bet["scale"])
             if s <= 0:
                 continue
+            bet["stake"] = s
             if record or publish:   # segment registry is live paper-path state, not part of the backtest
                 from .eval import apply_segment
                 bet = apply_segment(bet, cfg, row["Div"])

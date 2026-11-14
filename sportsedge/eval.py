@@ -29,14 +29,14 @@ ADJUST_LOG = "models/segments_log.jsonl"
 
 
 def odds_range(odds: float) -> str:
-    for lo, hi in zip(ODDS_EDGES[:-1], ODDS_EDGES[1:]):
+    for lo, hi in zip(ODDS_EDGES[:-2], ODDS_EDGES[1:-1]):
         if lo <= odds < hi:
             return f"{lo:g}-{hi:g}"
-    return "8+"
+    return "4+"
 
 
 def edge_bucket(edge: float) -> str:
-    for lo, hi in zip(EDGE_EDGES[:-1], EDGE_EDGES[1:]):
+    for lo, hi in zip(EDGE_EDGES[:-2], EDGE_EDGES[1:-1]):
         if lo <= edge < hi:
             return f"{int(lo*100)}-{int(hi*100)}%"
     return "10%+"
