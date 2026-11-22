@@ -37,7 +37,8 @@ def _simulate(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame | 
         if len(win):
             model = _pmodel(cfg).fit(df, as_of=cur)
             ou_b = mk.fit_ou_bias(model, df[df.Date < cur])
-            pred = PoissonPredictor(model, ou_b)
+            pred = PoissonPredictor(model, ou_b, ext=cfg.get("_ext"), injury_strength=cfg["model"].get("injury_strength", 0.15),
+                                    use_injuries=cfg["model"].get("use_injuries", False))
             if use_stack:
                 tr = table[(table.Date < cur)].dropna(subset=["pois_h"])
                 tr = tr[tr.y >= 0]
@@ -95,8 +96,21 @@ def _simulate(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame | 
     out = {"bets": b}
     if y_l:
         y = np.array(y_l)
-        out.update(logloss_model=_logloss(np.array(pm_l), y), logloss_market=_logloss(np.array(pk_l), y),
-                   logloss_blend=_logloss(np.array(pf_l), y), n_predictions=len(y))
+        pm, pf, pk = np.array(pm_l), np.array(pf_l), np.array(pk_l)
+        out.update(logloss_model=_logloss(pm, y), logloss_market=_logloss(pk, y),
+                   logloss_blend=_logloss(pf, y), n_predictions=len(y))
+        onehot = np.eye(3)[y]
+        out.update(brier_model=float(((pm - onehot) ** 2).mean()),
+                   brier_market=float(((pk - onehot) ** 2).mean()),
+                   brier_blend=float(((pf - onehot) ** 2).mean()))
+        conf, pred = pf.max(axis=1), pf.argmax(axis=1)   # confidence bins for the blend
+        edges = np.quantile(conf, np.linspace(0, 1, 11))
+        idx = np.digitize(conf, edges[1:-1])
+        out["calibration_bins"] = [
+            {"n": int(np.sum(idx == i)),
+             "conf": float(conf[idx == i].mean()) if np.any(idx == i) else float("nan"),
+             "acc": float((pred[idx == i] == y[idx == i]).mean()) if np.any(idx == i) else float("nan")}
+            for i in range(10)]
     if len(b):
         out.update(n_bets=len(b), staked=b.stake.sum(), profit=b.pnl.sum(), roi=b.pnl.sum() / b.stake.sum(),
                    hit_rate=b.won.mean(), avg_clv=b.clv.mean())
@@ -110,9 +124,12 @@ def _simulate(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame | 
     return out
 
 
-def run_backtest(df: pd.DataFrame, cfg: dict, seed: int = 0, table: pd.DataFrame | None = None) -> dict:
+def run_backtest(df: pd.DataFrame, cfg: dict, seed: int | None = None, table: pd.DataFrame | None = None) -> dict:
     """Phase 4: the configured strategy AND the market-only baseline (de-vigged consensus vs bookmaker
-    prices, same filters and staking), simulated with the same walk-forward windows."""
+    prices, same filters and staking), simulated with the same walk-forward windows.
+    `seed` comes from config (`backtest.seed`) unless overridden: same inputs -> identical outputs."""
+    if seed is None:
+        seed = int(cfg.get("backtest", {}).get("seed", 0))
     out = _simulate(df, cfg, seed, table)
     if "error" in out:
         return out
@@ -142,6 +159,7 @@ def summarize(res: dict) -> str:
     lines = [f"predictions scored : {res.get('n_predictions', 0)}"]
     if "logloss_model" in res:
         lines += [f"log loss  model/market/blend : {res['logloss_model']:.4f} / {res['logloss_market']:.4f} / {res['logloss_blend']:.4f}",
+                  f"brier     model/market/blend : {res['brier_model']:.4f} / {res['brier_market']:.4f} / {res['brier_blend']:.4f}",
                   "  (lower is better; if model > market, the model alone is NOT beating the market)"]
     if "n_bets" in res:
         lo, hi = res["roi_ci95"]

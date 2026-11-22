@@ -43,3 +43,21 @@ class ApiFootballProvider(InjuryProvider):
 def load_provider(cfg) -> InjuryProvider:
     p = cfg.get("external", {}).get("injuries_csv")
     return CsvInjuryProvider(p) if p and os.path.exists(p) else NullProvider()
+
+
+class XgProvider:
+    """Real xG source (Understat/FBref) to replace the shots-based proxy in features.xg_proxy.
+    Contract: returns (xG_for, xG_against) for `team` in matches up to `date`, or None when unknown.
+    Providers must only use data that was PUBLIC at `date` (no look-ahead)."""
+
+    def team_xg(self, team: str, date) -> tuple[float, float] | None:
+        raise NotImplementedError
+
+
+class UnderstatProvider(XgProvider):
+    """BLOCKED (2026-11-22): Understat has no official public API and its data is served via
+    per-match HTML pages (scraping required, no rate-limit contract, no stable schema); FBref
+    blocks automated scraping by robots.txt/ToS and needs a per-team ID mapping that changes
+    between seasons. Wiring this means a scraper + a cache + legal sign-off before any model
+    change — out of scope for the engine phase. The shots-based xg_proxy remains in use."""
+    pass

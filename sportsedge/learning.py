@@ -189,7 +189,7 @@ def improve(cfg: dict, df: pd.DataFrame) -> dict:
     chall_hold = blend_ll(r_ch, w, r_ch_cal)[cut:]
     market_hold = -np.log(np.clip(base["PK"][cut:][np.arange(n - cut), base["y"][cut:]], 1e-9, 1))
     diff = champ_hold - chall_hold                                # >0 means challenger better
-    lo, hi = _boot_ci(diff, L["ci"])
+    lo, hi = _boot_ci(diff, L["ci"], seed=int(L.get("seed", 0)))
     decision.update(challenger=chall, challenger_cal=r_ch_cal.to_dict(), holdout_n=n - cut,
                     ll_champion=float(champ_hold.mean()), ll_challenger=float(chall_hold.mean()),
                     ll_market=float(market_hold.mean()), gain=float(diff.mean()), gain_ci=[lo, hi])

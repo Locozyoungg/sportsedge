@@ -1,0 +1,5 @@
+# Team-name canonicalization, applied by the loader to history AND fixtures AND settle joins.
+# Format: name,canonical  (name = spelling as it appears in the raw feed; canonical = the spelling to keep)
+# Audit 2026-11-22: scanned all leagues/seasons for cross-season spelling variants — none found,
+# so this file is intentionally empty. Add a row here if a club ever appears under two spellings.
+name,canonical

@@ -21,7 +21,8 @@ def pois_feats(p) -> dict:
 
 def _pmodel(cfg):
     m = cfg["model"]
-    return PoissonModel(m["half_life_days"], m["reg"], m["max_goals"], m.get("dc", True), m.get("newteam_prior", False))
+    return PoissonModel(m["half_life_days"], m["reg"], m["max_goals"], m.get("dc", True),
+                        m.get("newteam_prior", False), m.get("max_tail_mass", 0.20))
 
 
 def _state(cfg):
@@ -69,6 +70,7 @@ def build_table(df: pd.DataFrame, cfg, ext=None):
 
 class Stacker:
     def __init__(self, cfg):
+        self.cfg = cfg
         s = cfg.get("stack", {})
         self.w = s.get("weights", {"logreg": 0.5, "hgb": 0.5})
         self.models = {}
@@ -80,10 +82,11 @@ class Stacker:
         from sklearn.pipeline import make_pipeline
         from sklearn.preprocessing import StandardScaler
         X = X[FEATURES].to_numpy(float)
+        seed = int(self.cfg.get("backtest", {}).get("seed", 0))
         self.models = {
             "logreg": make_pipeline(SimpleImputer(strategy="median"), StandardScaler(), LogisticRegression(C=0.3, max_iter=500)),
             "hgb": HistGradientBoostingClassifier(max_depth=3, learning_rate=0.05, max_iter=120, l2_regularization=1.0,
-                                                  min_samples_leaf=40, random_state=0),
+                                                  min_samples_leaf=40, random_state=seed),
         }
         for m in self.models.values():
             m.fit(X, np.asarray(y))
@@ -123,21 +126,35 @@ def stack_walk_forward(table: pd.DataFrame, cfg) -> pd.DataFrame:
 class PoissonPredictor:
     kind = "poisson"
 
-    def __init__(self, model, ou_b: float = 0.0):
+    def __init__(self, model, ou_b: float = 0.0, ext=None, injury_strength: float = 0.15, use_injuries: bool = False):
         self.model = model
         self.ou_b = ou_b
+        self.ext = ext                # InjuryProvider (B5); NullProvider when no injuries data exists
+        self.injury_k = float(injury_strength)
+        self.use_injuries = bool(use_injuries)
+
+    def _scale(self, row) -> tuple[float, float]:
+        """Attack-strength multipliers for key absences (capped, config-controlled). 1.0 when off/absent."""
+        if not self.use_injuries or self.ext is None:
+            return (1.0, 1.0)
+        ih = float(self.ext.impact(row["HomeTeam"], row["Date"]))
+        ia = float(self.ext.impact(row["AwayTeam"], row["Date"]))
+        return (float(np.exp(-self.injury_k * min(ih, 5.0))), float(np.exp(-self.injury_k * min(ia, 5.0))))
 
     def knows(self, row):
         return self.model.knows(row["HomeTeam"], row["AwayTeam"])
 
     def one_x_two(self, row):
-        return self.model.predict_1x2(row["HomeTeam"], row["AwayTeam"])
+        g = self.grid(row)
+        return np.array([np.tril(g, -1).sum(), np.trace(g), np.triu(g, 1).sum()])
 
     def grid(self, row):
-        return self.model.score_grid(row["HomeTeam"], row["AwayTeam"])
+        return self.model.score_grid(row["HomeTeam"], row["AwayTeam"], self._scale(row))
 
     def xg(self, row):
-        return self.model.expected_goals(row["HomeTeam"], row["AwayTeam"])
+        lh, la = self.model.expected_goals(row["HomeTeam"], row["AwayTeam"])
+        sh, sa = self._scale(row)
+        return float(lh * sh), float(la * sa)
 
     def ou_prob(self, row):
         """P(over 2.5) with the leak-free per-league totals-bias correction applied (AUDIT item 4)."""
@@ -149,8 +166,9 @@ class PoissonPredictor:
 class StackPredictor(PoissonPredictor):
     kind = "stack"
 
-    def __init__(self, model, stacker, feat_fn, ou_b: float = 0.0):
-        super().__init__(model, ou_b)
+    def __init__(self, model, stacker, feat_fn, ou_b: float = 0.0, ext=None,
+                 injury_strength: float = 0.15, use_injuries: bool = False):
+        super().__init__(model, ou_b, ext, injury_strength, use_injuries)
         self.stacker, self.feat_fn = stacker, feat_fn
 
     def one_x_two(self, row):
@@ -163,6 +181,8 @@ def make_predictors(hist: pd.DataFrame, cfg, ext=None) -> dict:
     """Per-league predictors fit on ALL history (live use). type=stack builds the table once and trains the stacker."""
     preds = {}
     use_stack = cfg["model"].get("type") == "stack"
+    use_inj = cfg["model"].get("use_injuries", False)
+    inj_k = cfg["model"].get("injury_strength", 0.15)
     if use_stack:
         table, states = build_table(hist, cfg, ext)
         tr = table.dropna(subset=["pois_h"])
@@ -175,7 +195,7 @@ def make_predictors(hist: pd.DataFrame, cfg, ext=None) -> dict:
         ou_b = mk.fit_ou_bias(pm, g)
         if use_stack and stacker is not None:
             st = states[div]
-            preds[div] = StackPredictor(pm, stacker, lambda r, st=st: st.features(r["HomeTeam"], r["AwayTeam"], r["Date"], r, ext), ou_b)
+            preds[div] = StackPredictor(pm, stacker, lambda r, st=st: st.features(r["HomeTeam"], r["AwayTeam"], r["Date"], r, ext), ou_b, ext, inj_k, use_inj)
         else:
-            preds[div] = PoissonPredictor(pm, ou_b)
+            preds[div] = PoissonPredictor(pm, ou_b, ext, inj_k, use_inj)
     return preds

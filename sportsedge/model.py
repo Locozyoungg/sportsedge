@@ -8,12 +8,13 @@ from scipy.stats import poisson
 
 class PoissonModel:
     def __init__(self, half_life_days: float = 200, reg: float = 0.5, max_goals: int = 10,
-                 dc: bool = True, newteam_prior: bool = False):
+                 dc: bool = True, newteam_prior: bool = False, max_tail_mass: float = 0.20):
         self.half_life = half_life_days
         self.reg = reg
         self.max_goals = max_goals
         self.dc = dc                      # Dixon-Coles low-score correction
         self.newteam_prior = newteam_prior  # let promoted/unknown teams be predicted from a weak-team prior
+        self.max_tail_mass = max_tail_mass  # refuse grids whose mass beyond max_goals exceeds this
         self.rho = 0.0
         self.teams: dict[str, int] = {}
         self.params: np.ndarray | None = None
@@ -95,8 +96,9 @@ class PoissonModel:
             return False
         return self.newteam_prior or (home in self.teams and away in self.teams)
 
-    def score_grid(self, home: str, away: str) -> np.ndarray:
+    def score_grid(self, home: str, away: str, lam_scale: tuple[float, float] = (1.0, 1.0)) -> np.ndarray:
         lh, la = self._lambdas(home, away)
+        lh, la = lh * float(lam_scale[0]), la * float(lam_scale[1])   # B5: injury-capped strength adjustment
         k = np.arange(self.max_goals + 1)
         g = np.outer(poisson.pmf(k, lh), poisson.pmf(k, la))
         if self.dc and self.rho:
@@ -104,6 +106,11 @@ class PoissonModel:
             g[0, 1] *= 1 + lh * self.rho
             g[1, 0] *= 1 + la * self.rho
             g[1, 1] *= 1 - self.rho
+        tail = 1.0 - float(g.sum())
+        if tail > self.max_tail_mass:
+            raise ValueError(f"score-grid tail mass {tail:.4f} exceeds max_tail_mass "
+                             f"{self.max_tail_mass} for {home} v {away} (lambda {lh:.2f}/{la:.2f})")
+        g = np.clip(g, 0.0, None)  # the DC low-score correction can push cells negative at high lambdas
         return g / g.sum()
 
     def predict_1x2(self, home: str, away: str) -> np.ndarray:

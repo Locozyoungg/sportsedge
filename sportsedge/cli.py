@@ -30,8 +30,17 @@ def cmd_fetch(cfg):
     return rep
 
 
+def _assert_valid(cfg, df):
+    """Every engine command aborts on fatal data problems instead of training on bad rows."""
+    rep = validate_history(df, cfg)
+    if not rep["ok"]:
+        raise SystemExit("data validation failed: " + "; ".join(rep["fatal"]))
+    return rep
+
+
 def cmd_backtest(cfg):
     df = data.load_history(cfg["paths"]["raw_dir"])
+    _assert_valid(cfg, df)
     for div, g in df.groupby("Div"):
         print(f"\n=== {div} ({cfg['model'].get('type', 'poisson')}) ===")
         print(summarize(run_backtest(g, cfg)))
@@ -112,6 +121,7 @@ def cmd_predict(cfg, record: bool, publish: bool = False):
             pass
     raw = cfg["paths"]["raw_dir"]
     hist, fx = data.load_history(raw), data.load_fixtures(raw, cfg)
+    _assert_valid(cfg, hist)
     if fx.empty:
         print("no upcoming fixtures. Run: python -m sportsedge fetch  (or `odds` with ODDS_API_KEY)")
         return
@@ -296,12 +306,14 @@ def _window_drawdown(bets, days: int, bankroll: float) -> float:
 
 def cmd_settle(cfg):
     hist = data.load_history(cfg["paths"]["raw_dir"])
+    aliases = data._aliases_for(cfg["paths"]["raw_dir"])
     led = Ledger(cfg["paths"]["ledger"])
     led.settle_predictions(hist)
     from .odds import devig_power, get_odds
     b = cfg["betting"]
     for bid, d, home, away, market, sel, line, odds, stk in led.open_bets():
-        m = hist[(hist.Date == pd.Timestamp(d)) & (hist.HomeTeam == home) & (hist.AwayTeam == away)]
+        m = hist[(hist.Date == pd.Timestamp(d)) & (hist.HomeTeam == data.canonical_team(home, aliases))
+                 & (hist.AwayTeam == data.canonical_team(away, aliases))]
         if len(m):
             r = m.iloc[0]
             clv, closing = None, None
@@ -358,7 +370,9 @@ def cmd_learn(cfg, force=False):
     if last and not force and (dt.datetime.now(dt.UTC).replace(tzinfo=None) - dt.datetime.fromisoformat(last["ts"])).days < cfg["learning"]["every_days"]:
         print("learning not due yet")
         return None
-    d = learning.improve(cfg, data.load_history(cfg["paths"]["raw_dir"]))
+    df = data.load_history(cfg["paths"]["raw_dir"])
+    _assert_valid(cfg, df)
+    d = learning.improve(cfg, df)
     print({k: v for k, v in d.items() if k not in ("champion_cal", "challenger_cal")})
     admin().send(f"<b>Learning run</b>: {d['decision']}. {d.get('reason', '')}")
     return d
@@ -394,6 +408,7 @@ def cmd_shadow(cfg):
     from .challengers import run_shadow, settle_shadow, propose_text
     raw = cfg["paths"]["raw_dir"]
     hist = data.load_history(raw)
+    _assert_valid(cfg, hist)
     fx = data.load_fixtures(raw, cfg)
     logged = run_shadow(cfg, hist, fx)
     rep = settle_shadow(cfg, hist, Ledger(cfg["paths"]["ledger"]))

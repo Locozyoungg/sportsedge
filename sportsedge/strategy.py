@@ -8,6 +8,19 @@ from . import markets as mk
 from .odds import devig_power, edge, get_odds, get_probs, haircut  # noqa: F401  (get_odds re-exported)
 
 OUT = ["H", "D", "A"]
+CLIP_LO, CLIP_HI = 1e-4, 1 - 1e-4
+
+
+def _sane_probs(p, ctx: str) -> np.ndarray:
+    """Every probability set must be finite, positive and sum to ~1. On violation: warn loudly,
+    clip to [1e-4, 1-1e-4] and renormalise — never let NaN/negative edge math pass silently."""
+    p = np.asarray(p, float)
+    if not np.all(np.isfinite(p)) or np.any(p <= 0) or abs(float(p.sum()) - 1) > 1e-3:
+        print(f"WARNING probabilities[{ctx}]: non-sane (sum={float(p.sum()):.4f}); clipped+renormalised")
+        p = np.clip(np.nan_to_num(p, nan=CLIP_LO, posinf=CLIP_HI, neginf=CLIP_LO), CLIP_LO, CLIP_HI)
+        s = p.sum()
+        p = p / s if s > 0 else np.full_like(p, 1 / len(p))
+    return p
 
 
 def _edge_cap(cfg: dict, div) -> float:
@@ -50,10 +63,12 @@ def probabilities(pred, row, cfg) -> dict | None:
     sharp = get_odds(row, b["sharp_cols"])
     pmmid = get_probs(row, b.get("polymarket_mid_cols", []))
     market = devig_power(sharp) if sharp is not None else pmmid if pmmid is not None else devig_power(next(iter(venues.values())))
-    raw = np.asarray(pred.one_x_two(row))
+    raw = _sane_probs(pred.one_x_two(row), "model 1X2")
     cal = cfg.get("_calibrator")
-    pm = cal.apply(raw) if (cal is not None and pred.kind == "poisson") else raw
-    out = {"x2": {"model_raw": raw, "model": pm, "market": market, "final": w * market + (1 - w) * pm,
+    pm = _sane_probs(cal.apply(raw), "calibrated 1X2") if (cal is not None and pred.kind == "poisson") else raw
+    market = _sane_probs(market, "market 1X2")
+    out = {"x2": {"model_raw": raw, "model": pm, "market": market,
+                  "final": _sane_probs(w * market + (1 - w) * pm, "blend 1X2"),
                   "venues": venues, "bet_odds": venues.get("bookmaker", next(iter(venues.values())))},
            "pred": pred}
     en = b["markets"]["enabled"]
@@ -66,7 +81,12 @@ def probabilities(pred, row, cfg) -> dict | None:
             po = pred.ou_prob(row) if hasattr(pred, "ou_prob") else mk.ou_probs(grid, 2.5)[0]
             so = get_odds(row, [c["sharp_over"], c["sharp_under"]])
             m = devig_power(so if so is not None else oo)[0]
-            out["ou"] = {"model": po, "market": m, "final": w * m + (1 - w) * po, "odds": haircut(oo, b.get("odds_haircut", 0.0))}
+            po, m = float(np.clip(po, CLIP_LO, CLIP_HI)), float(np.clip(m, CLIP_LO, CLIP_HI))
+            final = w * m + (1 - w) * po
+            if not (CLIP_LO <= final <= CLIP_HI):
+                print(f"WARNING probabilities[ou]: final={final:.4f} out of bounds; clipped")
+                final = float(np.clip(final, CLIP_LO, CLIP_HI))
+            out["ou"] = {"model": po, "market": m, "final": final, "odds": haircut(oo, b.get("odds_haircut", 0.0))}
     if "AH" in en:
         c = b["markets"]["ah"]
         try:
@@ -81,7 +101,12 @@ def probabilities(pred, row, cfg) -> dict | None:
                 pe = win / (win + loss)
                 sa = get_odds(row, [c["sharp_home"], c["sharp_away"]])
                 m = devig_power(sa if sa is not None else oa)[0]
-                out["ah"] = {"line": line, "model": pe, "market": m, "final": w * m + (1 - w) * pe,
+                pe, m = float(np.clip(pe, CLIP_LO, CLIP_HI)), float(np.clip(m, CLIP_LO, CLIP_HI))
+                final = w * m + (1 - w) * pe
+                if not (CLIP_LO <= final <= CLIP_HI):
+                    print(f"WARNING probabilities[ah]: final={final:.4f} out of bounds; clipped")
+                    final = float(np.clip(final, CLIP_LO, CLIP_HI))
+                out["ah"] = {"line": line, "model": pe, "market": m, "final": final,
                              "scale": win + loss, "odds": haircut(oa, b.get("odds_haircut", 0.0))}
     return out
 
