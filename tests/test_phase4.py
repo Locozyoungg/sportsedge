@@ -274,7 +274,8 @@ def test_load_history_unifies_bom_mojibake_headers(tmp_path):
         encoding="utf-8")
     df = data.load_history(str(raw))
     assert len(df) == 4 and df.Div.notna().all() and set(df.Div) == {"D1"}
-    cfg = {"betting": {"venues": {"bookmaker": {"cols": ["B365H", "B365D", "B365A"]}}}}
+    cfg = {"betting": {"venues": {"bookmaker": {"cols": ["B365H", "B365D", "B365A"]}}},
+           "validate": {"min_rows": 0}}  # tiny fixture: min-rows check is not what this test exercises
     assert validate_history(df, cfg)["ok"]
     # and the validator must flag NaN Div if it ever reappears
     bad = df.copy()
