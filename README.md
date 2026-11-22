@@ -3,6 +3,9 @@
 Football (soccer) first. Pipeline: free data -> time-decayed Poisson model -> blend with de-vigged
 sharp market (Pinnacle) -> edge vs the odds you can actually get -> fractional-Kelly stake -> paper ledger.
 
+> **How to run it:** full setup, scheduling (Windows Task Scheduler / cron / Docker),
+> and troubleshooting: see **[RUNNING.md](RUNNING.md)**.
+
 ## Quick start
     pip install -r requirements.txt
     python -m pytest -q                 # sanity tests (synthetic data)
