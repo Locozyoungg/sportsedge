@@ -92,7 +92,7 @@ def _lineup_gate(cfg: dict, ext, bet: dict) -> bool:
         d = cfg.get("learning", {}).get("models_dir", "models")
         os.makedirs(d, exist_ok=True)
         with open(os.path.join(d, "publish_gate_log.jsonl"), "a") as f:
-            f.write(json.dumps({"ts": dt.datetime.utcnow().isoformat(), "home": bet["home"], "away": bet["away"],
+            f.write(json.dumps({"ts": dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat(), "home": bet["home"], "away": bet["away"],
                                 "market": bet.get("market"), "selection": bet.get("selection"),
                                 "impact": impact, "threshold": thresh, "action": "not_published"}, default=str) + "\n")
         print(f"lineup gate: NOT publishing {bet['home']} v {bet['away']} ({bet.get('selection')}) "
@@ -355,7 +355,7 @@ def cmd_health(cfg) -> bool:
 
 def cmd_learn(cfg, force=False):
     last = learning.last_log(cfg)
-    if last and not force and (dt.datetime.utcnow() - dt.datetime.fromisoformat(last["ts"])).days < cfg["learning"]["every_days"]:
+    if last and not force and (dt.datetime.now(dt.UTC).replace(tzinfo=None) - dt.datetime.fromisoformat(last["ts"])).days < cfg["learning"]["every_days"]:
         print("learning not due yet")
         return None
     d = learning.improve(cfg, data.load_history(cfg["paths"]["raw_dir"]))

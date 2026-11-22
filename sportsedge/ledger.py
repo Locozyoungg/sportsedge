@@ -4,7 +4,7 @@ import sqlite3, os, datetime as dt
 
 
 def _now():
-    return dt.datetime.utcnow().isoformat()
+    return dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat()
 
 
 SCHEMA = """CREATE TABLE IF NOT EXISTS bets(
@@ -43,7 +43,7 @@ class Ledger:
         try:
             self.db.execute(
                 "INSERT INTO bets(ts,match_date,home,away,market,selection,odds,stake,prob,edge,mode,line,venue,ref,div,odds_ts,book,p_market,p_model) VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                (dt.datetime.utcnow().isoformat(), str(bet["date"])[:10], bet["home"], bet["away"], bet.get("market", "1X2"),
+                (dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat(), str(bet["date"])[:10], bet["home"], bet["away"], bet.get("market", "1X2"),
                  bet["selection"], bet["odds"], bet["stake"], bet["prob"], bet["edge"], mode,
                  bet.get("line"), bet.get("venue", "bookmaker"), bet.get("ref"), bet.get("div"),
                  bet.get("odds_ts"), bet.get("book"), bet.get("p_market"), bet.get("p_model")))
@@ -73,7 +73,7 @@ class Ledger:
 
     def settled_since(self, days: int):
         import datetime as _dt
-        cut = (_dt.datetime.utcnow() - _dt.timedelta(days=days)).date().isoformat()
+        cut = (_dt.datetime.now(_dt.UTC).replace(tzinfo=None) - _dt.timedelta(days=days)).date().isoformat()
         return self.db.execute(
             "SELECT match_date,home,away,selection,odds,stake,status,pnl FROM bets "
             "WHERE status!='open' AND match_date>=? ORDER BY match_date", (cut,)).fetchall()

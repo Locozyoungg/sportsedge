@@ -43,6 +43,7 @@ def main() -> int:
     if not acquire():
         return 0  # skipped overlap: not an error for the scheduler
     os.chdir(ROOT)
+    sys.path.insert(0, str(ROOT))  # `python scripts/run_autopilot.py` puts scripts/ on sys.path, not the project root
     try:
         from sportsedge.cli import main as cli_main
         import sys as _sys

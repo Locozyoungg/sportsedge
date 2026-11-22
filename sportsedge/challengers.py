@@ -80,7 +80,7 @@ def run_shadow(cfg: dict, hist: pd.DataFrame, fixtures: pd.DataFrame) -> dict:
                 f.write(json.dumps({"challenger": mod.NAME, "match_date": str(row["Date"])[:10],
                                     "home": row["HomeTeam"], "away": row["AwayTeam"],
                                     "ph": p[0], "pd": p[1], "pa": p[2],
-                                    "ts": dt.datetime.utcnow().isoformat()}) + "\n")
+                                    "ts": dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat()}) + "\n")
                 n += 1
     return {"logged": n}
 
@@ -119,7 +119,7 @@ def settle_shadow(cfg: dict, hist: pd.DataFrame, ledger=None) -> dict:
             print("shadow: champion join failed, comparing challenger to market only:", e)
     L = cfg["learning"]
     min_n = L.get("shadow_min_matches", 300)
-    out = {"n": len(m), "min_matches": min_n, "challengers": [], "ts": dt.datetime.utcnow().isoformat()}
+    out = {"n": len(m), "min_matches": min_n, "challengers": [], "ts": dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat()}
     for name, g in m.groupby("challenger"):
         y = g.FTR.map(IDX).to_numpy()
         if len(y) < 50:

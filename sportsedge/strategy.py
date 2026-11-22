@@ -18,7 +18,7 @@ def _log_suspicious(cfg: dict, bet: dict, div) -> None:
     """Flag and log (never publish) edges above the league cap: model-vs-market disagreement."""
     d = cfg.get("learning", {}).get("models_dir", "models")
     os.makedirs(d, exist_ok=True)
-    rec = {"ts": dt.datetime.utcnow().isoformat(), "div": div, "market": bet["market"], "venue": bet["venue"],
+    rec = {"ts": dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat(), "div": div, "market": bet["market"], "venue": bet["venue"],
            "selection": bet["selection"], "line": bet.get("line"), "odds": bet["odds"],
            "edge": bet["edge"], "cap": _edge_cap(cfg, div)}
     with open(os.path.join(d, "suspicious_log.jsonl"), "a") as f:

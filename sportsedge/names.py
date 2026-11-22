@@ -13,6 +13,8 @@ ALIASES = {
     "bayer leverkusen": "leverkusen", "eintracht frankfurt": "ein frankfurt", "inter milan": "inter",
     "internazionale": "inter", "ac milan": "milan", "paris saint germain": "paris sg", "psg": "paris sg",
     "bayern munchen": "bayern munich", "rb leipzig": "rb leipzig", "saint etienne": "st etienne",
+    "queens park rangers": "qpr", "west bromwich albion": "west brom",
+    "hamburger sv": "hamburg", "hamburg sv": "hamburg",
 }
 STOP = {"fc", "cf", "afc", "fk", "sc", "the", "club", "calcio", "1"}
 

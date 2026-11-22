@@ -61,7 +61,7 @@ def save_version(cfg, model_params, calibrator, evidence):
     os.makedirs(vdir, exist_ok=True)
     prev = load_champion(cfg)
     n = (prev["version"] if prev else 0) + 1
-    rec = {"version": n, "created": dt.datetime.utcnow().isoformat(), "model": model_params,
+    rec = {"version": n, "created": dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat(), "model": model_params,
            "calibration": calibrator.to_dict(), "evidence": evidence}
     for p in (os.path.join(vdir, f"v{n}.json"), champ):
         with open(p, "w") as f:
@@ -76,7 +76,7 @@ def rollback(cfg, version: int):
         raise SystemExit(f"no such version {version}")
     with open(src) as f, open(champ, "w") as g:
         g.write(f.read())
-    _log(cfg, {"ts": dt.datetime.utcnow().isoformat(), "decision": "rollback", "to": version})
+    _log(cfg, {"ts": dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat(), "decision": "rollback", "to": version})
 
 
 # ---------- walk-forward probabilities ----------
@@ -152,7 +152,7 @@ def improve(cfg: dict, df: pd.DataFrame) -> dict:
 
     base = wf(champ_m["half_life_days"], champ_m["reg"])
     n = len(base["y"])
-    decision = {"ts": dt.datetime.utcnow().isoformat(), "n_predictions": n, "champion": champ_m,
+    decision = {"ts": dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat(), "n_predictions": n, "champion": champ_m,
                 "champion_cal": champ_cal.to_dict()}
     cut = int(n * (1 - L["holdout_frac"]))
     if n - cut < L["min_holdout_matches"]:
@@ -194,7 +194,7 @@ def improve(cfg: dict, df: pd.DataFrame) -> dict:
                     ll_champion=float(champ_hold.mean()), ll_challenger=float(chall_hold.mean()),
                     ll_market=float(market_hold.mean()), gain=float(diff.mean()), gain_ci=[lo, hi])
     last = last_log(cfg, "promoted")
-    recent = last and (dt.datetime.utcnow() - dt.datetime.fromisoformat(last["ts"])).days < L["min_days_between_promotions"]
+    recent = last and (dt.datetime.now(dt.UTC).replace(tzinfo=None) - dt.datetime.fromisoformat(last["ts"])).days < L["min_days_between_promotions"]
     same = (chall == champ_m and np.allclose(r_ch_cal.b, champ_cal.b, atol=1e-3) and abs(r_ch_cal.T - champ_cal.T) < 1e-3)
     if same:
         decision.update(decision="kept", reason="challenger identical to champion")

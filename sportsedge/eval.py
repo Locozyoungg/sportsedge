@@ -168,7 +168,7 @@ def _load_state() -> dict:
 
 def _save_state(state: dict, cfg: dict):
     d = cfg["learning"]["models_dir"]
-    state["updated"] = dt.datetime.utcnow().isoformat()
+    state["updated"] = dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat()
     os.makedirs(os.path.join(d, "segments_history"), exist_ok=True)
     with open(os.path.join(d, "segments_history", state["updated"].replace(":", "").replace(".", "") + ".json"), "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, default=str)
@@ -197,12 +197,12 @@ def auto_adjust(cfg: dict, ledger) -> dict:
         seg = "|".join(str(k) for k in key)
         cur = state["segments"].get(seg, {"multiplier": 1.0, "status": "active", "n": 0,
                                           "cal_kind": None, "cal": None, "updated": None})
-        rec = {"ts": dt.datetime.utcnow().isoformat(), "segment": seg, "n": len(g),
+        rec = {"ts": dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat(), "segment": seg, "n": len(g),
                "clv": _clv(g), "bias": float(g.prob.mean() - (g.pnl > 0).mean()), "before": dict(cur)}
         won = (g.pnl > 0).astype(float)
         # 1) pause when calibration error exceeds the limit (checked first: paused segments skip the rest)
         if cur["status"] != "paused" and len(g) >= min_recal and abs(rec["bias"]) > bias_limit:
-            cur.update(status="paused", updated=dt.datetime.utcnow().isoformat())
+            cur.update(status="paused", updated=dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat())
             rec.update(after=dict(cur), action="pause", reason=f"bias {rec['bias']:+.3f} beyond +/-{bias_limit}")
         else:
             # 2) recalibrate probabilities per segment (isotonic on the segment's own settled picks)
@@ -210,13 +210,13 @@ def auto_adjust(cfg: dict, ledger) -> dict:
                 from sklearn.isotonic import IsotonicRegression
                 iso = IsotonicRegression(out_of_bounds="clip").fit(g.prob.to_numpy(), won.to_numpy())
                 cur.update(cal_kind="isotonic", cal=[float(v) for v in iso.predict([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9])],
-                           updated=dt.datetime.utcnow().isoformat())
+                           updated=dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat())
                 rec.update(after=dict(cur), action="recalibrate", reason=">= 300 settled picks in segment")
             # 3) reduce the stake multiplier on negative CLV (never increase)
             if len(g) >= min_clv_n and np.isfinite(rec["clv"]) and rec["clv"] < 0:
                 new_m = max(0.25, round(cur.get("multiplier", 1.0) * 0.5, 2))
                 if new_m < cur.get("multiplier", 1.0):
-                    cur.update(multiplier=new_m, updated=dt.datetime.utcnow().isoformat())
+                    cur.update(multiplier=new_m, updated=dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat())
                     rec.update(after=dict(cur), action="reduce",
                                reason=f"CLV {rec['clv']:+.2%} negative over {len(g)} picks")
             cur["n"] = len(g)
@@ -266,5 +266,5 @@ def rollback(cfg: dict, ts: str):
         state = json.load(f)
     with open(os.path.join(d, "segments.json"), "w", encoding="utf-8") as f:
         json.dump(state, f, indent=2, default=str)
-    _log(cfg, {"ts": dt.datetime.utcnow().isoformat(), "action": "rollback", "to": ts})
+    _log(cfg, {"ts": dt.datetime.now(dt.UTC).replace(tzinfo=None).isoformat(), "action": "rollback", "to": ts})
     print(f"restored segments state from {ts}")
